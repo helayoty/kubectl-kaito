@@ -1,0 +1,82 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-cross-platform:
+    name: E2E Cross Platform Tests
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: [1.24.x]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+        # Skip hardening on Windows due to compatibility
+        if: runner.os != 'Windows'
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.go-version }}-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build kubectl-kaito
+        run: make build
+
+      - name: Run basic functionality tests
+        shell: bash
+        run: |
+          # Test version command
+          ./bin/kubectl-kaito version
+          ./bin/kubectl-kaito version --short
+          
+          # Test help commands
+          ./bin/kubectl-kaito --help
+          ./bin/kubectl-kaito deploy --help
+          ./bin/kubectl-kaito tune --help
+          ./bin/kubectl-kaito preset --help
+          
+          # Test preset list
+          ./bin/kubectl-kaito preset list
+          ./bin/kubectl-kaito preset list --model llama
+          
+          # Test dry-run commands (no cluster required)
+          ./bin/kubectl-kaito deploy --name test-workspace --model llama-2-7b --dry-run
+          ./bin/kubectl-kaito tune --name test-tune --model phi-2 --dataset gs://test-data --preset lora --dry-run
+
+      - name: Run e2e tests
+        run: |
+          cd e2e
+          go test -v -timeout=10m ./...
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-${{ runner.os }}-test-results
+          path: e2e/

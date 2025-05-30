@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.24.x
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-1.24.x-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: make unit-tests
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Uncomment if you want to use a custom Krew index
+          # KREW_GITHUB_TOKEN: ${{ secrets.KREW_GITHUB_TOKEN }}
+
+      - name: Build all platforms
+        run: make build-all
+
+      - name: Create release archives
+        run: make release
+
+      - name: Generate checksums
+        run: make checksums
+
+      - name: Get tag name
+        id: tag
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/archives/*
+          name: Release ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
