@@ -7,7 +7,8 @@ before:
     - make test
 
 builds:
-  - env:
+  - main: ./cmd/kubectl-kaito
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -22,17 +23,17 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X github.com/kaito-project/kubectl-kaito/pkg/version.Version={{.Version}}
-      - -X github.com/kaito-project/kubectl-kaito/pkg/version.Commit={{.Commit}}
-      - -X github.com/kaito-project/kubectl-kaito/pkg/version.Date={{.Date}}
+      - -X github.com/kaito-project/kubectl-kaito/pkg/cmd.version={{.Version}}
+      - -X github.com/kaito-project/kubectl-kaito/pkg/cmd.commit={{.Commit}}
+      - -X github.com/kaito-project/kubectl-kaito/pkg/cmd.date={{.Date}}
     binary: kubectl-kaito
 
 archives:
   - format: tar.gz
     name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
+      {{ .ProjectName }}-{{ .Version }}-
+      {{- .Os }}-
+      {{- if eq .Arch "amd64" }}amd64
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
@@ -91,7 +92,15 @@ release:
   header: |
     ## kubectl kaito {{ .Tag }}
 
-    Welcome to this new release of kubectl-kaito! 
+    Welcome to this new release of kubectl-kaito! 🚀
+
+    ### Available Commands
+    - `kubectl kaito deploy` - Deploy AI models for inference
+    - `kubectl kaito status` - Check workspace status and health
+    - `kubectl kaito get-endpoint` - Get inference service endpoints
+    - `kubectl kaito chat` - Interactive chat with deployed models
+    - `kubectl kaito models` - List and describe available models
+    - `kubectl kaito rag` - Deploy and query RAG engines
 
     ### Installation
 
@@ -128,12 +137,22 @@ krews:
       name: kaito-release-bot
       email: "kaito-project@users.noreply.github.com"
     homepage: "https://github.com/kaito-project/kaito"
-    short_description: "Deploy and manage AI/ML models in Kubernetes using Kaito"
+    short_description: "Manage AI/ML model inference and RAG with Kaito"
     description: |
-      kubectl-kaito is a kubectl plugin for managing AI/ML workloads with Kaito
-      (Kubernetes AI Toolchain Operator). It provides commands to deploy models
-      for inference, fine-tune existing models, monitor workspace status, and
-      manage the complete AI/ML lifecycle in Kubernetes clusters.
+      kubectl-kaito is a kubectl plugin for managing AI/ML model inference 
+      and RAG (Retrieval-Augmented Generation) workloads using the Kubernetes 
+      AI Toolchain Operator (Kaito).
+
+      This plugin simplifies the deployment, management, and monitoring of AI models
+      in Kubernetes clusters through Kaito workspaces and RAG engines.
+
+      Features:
+      - Deploy AI models for inference with automatic GPU provisioning
+      - Manage workspace lifecycle and monitor status with real-time updates
+      - Interactive chat with deployed models using OpenAI-compatible API
+      - Deploy and query RAG engines for document-based question answering
+      - Discover and validate available model presets from Kaito repository
+      - Get inference endpoints for programmatic access to deployed models
     caveats: |
       This plugin requires:
       * kubectl to be installed and configured

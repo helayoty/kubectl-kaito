@@ -1,0 +1,138 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.21"
+
+jobs:
+  e2e-basic:
+    name: E2E Basic Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run basic e2e tests
+        run: make test-e2e-basic
+
+  e2e-kind:
+    name: E2E Kind Cluster Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Set up Kind
+        uses: helm/kind-action@v1.8.0
+        with:
+          install_only: true
+
+      - name: Verify Kind installation
+        run: kind version
+
+      - name: Run Kind e2e tests
+        run: make test-e2e-kind
+
+  e2e-aks:
+    name: E2E AKS Cluster Tests
+    runs-on: ubuntu-latest
+    # Only run AKS tests on main branch pushes to avoid unnecessary costs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: azure-testing
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Verify Azure CLI
+        run: |
+          az --version
+          az account show
+
+      - name: Run AKS e2e tests
+        run: make test-e2e-aks
+        env:
+          AKS_RESOURCE_GROUP: kaito-e2e-ci-${{ github.run_number }}
+          AKS_CLUSTER_NAME: kaito-e2e-ci-${{ github.run_number }}
+
+      - name: Cleanup on failure
+        if: failure()
+        run: |
+          echo "Cleaning up resources after test failure..."
+          az group delete --name kaito-e2e-ci-${{ github.run_number }} --yes --no-wait || true
+
+  # Summary job to provide a single status check
+  e2e-tests-summary:
+    name: E2E Tests Summary
+    runs-on: ubuntu-latest
+    needs: [e2e-basic, e2e-kind]
+    # Don't require AKS tests to pass for PR status checks
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "E2E Basic Tests: ${{ needs.e2e-basic.result }}"
+          echo "E2E Kind Tests: ${{ needs.e2e-kind.result }}"
+
+          if [[ "${{ needs.e2e-basic.result }}" == "success" && "${{ needs.e2e-kind.result }}" == "success" ]]; then
+            echo "✅ All required E2E tests passed"
+            exit 0
+          else
+            echo "❌ Some E2E tests failed"
+            exit 1
+          fi

@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Copyright (c) 2024 Kaito Project
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Script to prepare kubectl-kaito for Krew submission
 # Usage: ./scripts/prepare-krew-release.sh v0.1.0
 
@@ -27,11 +41,11 @@ echo "🚀 Preparing Krew release for $VERSION"
 # Clean and build
 echo "📦 Building binaries..."
 make clean
-make build-all
+VERSION=$VERSION make build-all
 
 # Create release archives
 echo "📂 Creating release archives..."
-make release
+VERSION=$VERSION make release
 
 # Generate checksums
 echo "🔐 Generating checksums..."
@@ -81,18 +95,19 @@ spec:
   shortDescription: Manage AI/ML model inference and fine-tuning with Kaito
   description: |
     kubectl-kaito is a command-line tool for managing AI/ML model inference 
-    and fine-tuning workloads using the Kubernetes AI Toolchain Operator (Kaito).
+    and RAG (Retrieval-Augmented Generation) workloads using the Kubernetes 
+    AI Toolchain Operator (Kaito).
 
     This plugin simplifies the deployment, management, and monitoring of AI models
-    in Kubernetes clusters through Kaito workspaces.
+    in Kubernetes clusters through Kaito workspaces and RAG engines.
 
     Features:
     - Deploy AI models for inference with automatic GPU provisioning
-    - Fine-tune models with custom datasets using QLora and LoRA techniques  
-    - Monitor workspace status with real-time updates
-    - View logs from inference and training workloads
-    - Discover available model presets for various AI model families
-    - Delete workspaces with proper cleanup of GPU resources
+    - Manage workspace lifecycle and monitor status with real-time updates
+    - Interactive chat with deployed models using OpenAI-compatible API
+    - Deploy and query RAG engines for document-based question answering
+    - Discover and validate available model presets from Kaito repository
+    - Get inference endpoints for programmatic access to deployed models
 
   caveats: |
     This plugin requires:
