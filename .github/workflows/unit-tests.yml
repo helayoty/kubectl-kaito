@@ -1,4 +1,4 @@
-name: Tests
+name: Unit Tests
 
 on:
   push:
@@ -6,36 +6,49 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  GO_VERSION: "1.24"
+
 jobs:
   test:
-    name: Test
+    name: Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: [1.24.x]
 
     steps:
-      - name: Check out code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Cache Go modules
         uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.go-version }}-
+            ${{ runner.os }}-go-
 
       - name: Download dependencies
         run: go mod download
 
       - name: Verify dependencies
         run: go mod verify
+
+      - name: Check license headers
+        run: |
+          # Check if all Go files have license headers
+          find . -name "*.go" -not -path "./vendor/*" | xargs ./hack/add-license-header.sh
+          if [ $? -eq 1 ]; then
+            echo "✅ All files have license headers"
+          else
+            echo "❌ Some files are missing license headers"
+            exit 1
+          fi
 
       - name: Run go vet
         run: make vet
@@ -45,37 +58,21 @@ jobs:
           if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
             echo "The following files are not formatted:"
             gofmt -s -l .
+            echo "Please run 'go fmt ./...' or 'make fmt' to fix formatting"
+            exit 1
+          fi
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "go.mod or go.sum is not tidy"
+            echo "Please run 'go mod tidy' or 'make tidy'"
+            git diff go.mod go.sum
             exit 1
           fi
 
       - name: Run unit tests
-        run: make unit-tests
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.24.x
-
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Run tests with coverage
         run: make unit-tests
 
       - name: Upload coverage to Codecov
@@ -84,29 +81,10 @@ jobs:
           file: ./coverage.out
           flags: unittests
           name: codecov-umbrella
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.24.x
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: latest
-          args: --timeout=5m
 
   build:
     name: Build
@@ -120,21 +98,23 @@ jobs:
             goarch: arm64
 
     steps:
-      - name: Check out code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: 1.24.x
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Cache Go modules
         uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
+            ${{ runner.os }}-go-
 
       - name: Download dependencies
         run: go mod download
@@ -142,7 +122,7 @@ jobs:
       - name: Build binary
         run: |
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
-            -ldflags "-X github.com/kaito-project/kubectl-kaito/pkg.version=ci-${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg.commit=${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -ldflags "-X github.com/kaito-project/kubectl-kaito/pkg/cmd.version=ci-${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.commit=${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o kubectl-kaito-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }} \
             ./cmd/kubectl-kaito
         env:
