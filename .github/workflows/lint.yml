@@ -167,9 +167,10 @@ jobs:
         run: go mod download
 
       - name: Run gosec Security Scanner
-        uses: securecodewarrior/github-action-gosec@master
-        with:
-          args: '-no-fail -fmt sarif -out gosec.sarif ./...'
+        run: |
+          echo "Installing and running gosec..."
+          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+          gosec -no-fail -fmt sarif -out gosec.sarif ./...
 
       - name: Upload SARIF file
         if: always()

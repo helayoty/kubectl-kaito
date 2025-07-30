@@ -1,6 +1,6 @@
 # GolangCI configuration for kubectl-kaito plugin
 ---
-version: 2
+version: "2"
 
 run:
   timeout: 10m
