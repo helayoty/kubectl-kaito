@@ -53,10 +53,7 @@ in Kubernetes clusters through Kaito workspaces.`,
   %s chat --workspace-name my-llama
 
   # List supported models
-  %s models list
-
-  # Deploy a RAG engine
-  %s rag deploy --name my-rag --vector-db faiss --index-service llamaindex`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName),
+  %s models list`, cmdName, cmdName, cmdName, cmdName, cmdName),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			klog.V(4).Info("Initializing kubectl-kaito command")
 			return nil
@@ -74,7 +71,7 @@ in Kubernetes clusters through Kaito workspaces.`,
 	cmd.AddCommand(NewGetEndpointCmd(configFlags))
 	cmd.AddCommand(NewChatCmd(configFlags))
 	cmd.AddCommand(NewModelsCmd(configFlags))
-	cmd.AddCommand(NewRagCmd(configFlags))
+	// cmd.AddCommand(NewRagCmd(configFlags)) // Hidden until RAGEngine CRD is available
 
 	return cmd
 }
