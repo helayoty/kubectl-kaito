@@ -225,7 +225,6 @@ func validateRagQueryOptions(ragName, question string, interactive bool) error {
 func runRagDeploy(configFlags *genericclioptions.ConfigFlags, ragName, namespace, vectorDB, indexService,
 	embeddingModel, dataSource string, chunkSize, chunkOverlap int, accessMode, accessSecret,
 	storageSize, storageClass string, dryRun bool) error {
-
 	klog.V(2).Infof("Deploying RAG engine: %s", ragName)
 
 	// Get namespace
@@ -287,7 +286,6 @@ func runRagDeploy(configFlags *genericclioptions.ConfigFlags, ragName, namespace
 
 func runRagQuery(configFlags *genericclioptions.ConfigFlags, ragName, namespace, question string,
 	topK int, temperature float64, format string, interactive bool) error {
-
 	klog.V(2).Infof("Querying RAG engine: %s", ragName)
 
 	// Get namespace
@@ -354,7 +352,6 @@ func runRagQuery(configFlags *genericclioptions.ConfigFlags, ragName, namespace,
 
 func buildRAGEngine(ragName, namespace, vectorDB, indexService, embeddingModel, dataSource string,
 	chunkSize, chunkOverlap int, accessMode, accessSecret, storageSize, storageClass string) *unstructured.Unstructured {
-
 	klog.V(4).Info("Building RAGEngine configuration")
 
 	spec := map[string]interface{}{
@@ -422,7 +419,6 @@ func buildRAGEngine(ragName, namespace, vectorDB, indexService, embeddingModel, 
 
 func showRagDeployDryRun(ragName, namespace, vectorDB, indexService, embeddingModel, dataSource string,
 	chunkSize, chunkOverlap int, accessMode, storageSize, storageClass string) error {
-
 	klog.V(2).Info("Running RAG deploy in dry-run mode")
 
 	klog.Info("🔍 Dry-run mode: Showing what would be created")

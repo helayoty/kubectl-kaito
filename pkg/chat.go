@@ -32,6 +32,7 @@ import (
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/dynamic"
@@ -245,18 +246,40 @@ func (o *ChatOptions) testEndpoint(endpoint string) bool {
 func (o *ChatOptions) getModelName(config interface{}) (string, error) {
 	klog.V(4).Info("Getting model name from workspace")
 
+	workspace, err := o.getWorkspace()
+	if err != nil {
+		return "", err
+	}
+
+	// Try to get model name from different possible locations in the workspace spec
+	if modelName := o.extractModelFromSpec(workspace); modelName != "" {
+		return modelName, nil
+	}
+
+	if modelName := o.extractModelFromInference(workspace); modelName != "" {
+		return modelName, nil
+	}
+
+	if modelName := o.extractModelFromInferenceModel(workspace); modelName != "" {
+		return modelName, nil
+	}
+
+	return "Unknown", nil
+}
+
+func (o *ChatOptions) getWorkspace() (*unstructured.Unstructured, error) {
 	// Get REST config
 	restConfig, err := o.configFlags.ToRESTConfig()
 	if err != nil {
 		klog.Errorf("Failed to get REST config: %v", err)
-		return "", fmt.Errorf("failed to get REST config: %w", err)
+		return nil, fmt.Errorf("failed to get REST config: %w", err)
 	}
 
 	// Create dynamic client
 	dynamicClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
 		klog.Errorf("Failed to create dynamic client: %v", err)
-		return "", fmt.Errorf("failed to create dynamic client: %w", err)
+		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
 	gvr := schema.GroupVersionResource{
@@ -272,57 +295,73 @@ func (o *ChatOptions) getModelName(config interface{}) (string, error) {
 	)
 	if err != nil {
 		klog.Errorf("Failed to get workspace %s: %v", o.WorkspaceName, err)
-		return "", fmt.Errorf("failed to get workspace %s: %w", o.WorkspaceName, err)
+		return nil, fmt.Errorf("failed to get workspace %s: %w", o.WorkspaceName, err)
 	}
 
-	// Try to get model name from different possible locations in the workspace spec
-	
-	// First try: spec.inference.preset.name
-	if spec, found := workspace.Object["spec"]; found {
-		if specMap, ok := spec.(map[string]interface{}); ok {
-			if inference, found := specMap["inference"]; found {
-				if inferenceMap, ok := inference.(map[string]interface{}); ok {
-					if preset, found := inferenceMap["preset"]; found {
-						if presetMap, ok := preset.(map[string]interface{}); ok {
-							if name, found := presetMap["name"]; found {
-								if nameStr, ok := name.(string); ok {
-									return nameStr, nil
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	return workspace, nil
+}
+
+func (o *ChatOptions) extractModelFromSpec(workspace *unstructured.Unstructured) string {
+	// Try: spec.inference.preset.name
+	return o.extractStringFromPath(workspace.Object, []string{"spec", "inference", "preset", "name"})
+}
+
+func (o *ChatOptions) extractModelFromInference(workspace *unstructured.Unstructured) string {
+	// Try: top-level inference.preset.name (for newer workspace structure)
+	return o.extractStringFromPath(workspace.Object, []string{"inference", "preset", "name"})
+}
+
+func (o *ChatOptions) extractModelFromInferenceModel(workspace *unstructured.Unstructured) string {
+	// Try: Check if there's a model field directly in inference
+	return o.extractStringFromPath(workspace.Object, []string{"inference", "model"})
+}
+
+func (o *ChatOptions) extractStringFromPath(obj map[string]interface{}, path []string) string {
+	if len(path) == 0 || obj == nil {
+		return ""
 	}
-	
-	// Second try: top-level inference.preset.name (for newer workspace structure)
-	if inference, found := workspace.Object["inference"]; found {
-		if inferenceMap, ok := inference.(map[string]interface{}); ok {
-			if preset, found := inferenceMap["preset"]; found {
-				if presetMap, ok := preset.(map[string]interface{}); ok {
-					if name, found := presetMap["name"]; found {
-						if nameStr, ok := name.(string); ok {
-							return nameStr, nil
-						}
-					}
-				}
-			}
+
+	current := obj
+	for i, key := range path {
+		value, exists := current[key]
+		if !exists {
+			return ""
 		}
-	}
-	
-	// Third try: Check if there's a model field directly in inference
-	if inference, found := workspace.Object["inference"]; found {
-		if inferenceMap, ok := inference.(map[string]interface{}); ok {
-			if model, found := inferenceMap["model"]; found {
-				if modelStr, ok := model.(string); ok {
-					return modelStr, nil
-				}
-			}
+
+		// Handle the final element in the path
+		if i == len(path)-1 {
+			return o.convertToString(value)
+		}
+
+		// Handle intermediate elements - must be maps
+		if nextMap, ok := value.(map[string]interface{}); ok {
+			current = nextMap
+		} else {
+			return ""
 		}
 	}
 
-	return "Unknown", nil
+	return ""
+}
+
+// convertToString safely converts various types to string
+func (o *ChatOptions) convertToString(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case *string:
+		if v != nil {
+			return *v
+		}
+	case fmt.Stringer:
+		return v.String()
+	default:
+		// For other types, use fmt.Sprintf for safe conversion
+		if str := fmt.Sprintf("%v", v); str != "<nil>" && str != "" {
+			return str
+		}
+	}
+	return ""
 }
 
 func (o *ChatOptions) startInteractiveSession(endpoint, modelName string) error {

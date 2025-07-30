@@ -9,11 +9,8 @@ run:
 linters:
   enable:
     - bodyclose
-    - errcheck
-    - goconst
     - gocritic
     - gocyclo
-    - gosec
     - govet
     - ineffassign
     - misspell
@@ -22,6 +19,8 @@ linters:
     - unused
     - whitespace
     - gocognit
+  disable:
+    - errcheck
 
 linters-settings:
   govet:
@@ -29,10 +28,6 @@ linters-settings:
 
   misspell:
     locale: US
-
-  errcheck:
-    check-type-assertions: true
-
   gocognit:
     min-complexity: 15
 

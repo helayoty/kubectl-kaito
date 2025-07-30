@@ -79,7 +79,7 @@ func TestAKSClusterOperations(t *testing.T) {
 
 // isAKSCluster checks if we're connected to an AKS cluster
 func isAKSCluster(t *testing.T) bool {
-	stdout, _, err := runKubectlCommand(t, testTimeout, "config", "current-context")
+	stdout, err := runKubectlCommand(t, testTimeout, "config", "current-context")
 	if err != nil {
 		t.Logf("Failed to get current context: %v", err)
 		return false
@@ -91,7 +91,7 @@ func isAKSCluster(t *testing.T) bool {
 	}
 	
 	// Additional check: AKS clusters usually have azure-related API server URLs
-	stdout, _, err = runKubectlCommand(t, testTimeout, "cluster-info")
+	stdout, err = runKubectlCommand(t, testTimeout, "cluster-info")
 	if err != nil {
 		t.Logf("Failed to get cluster info: %v", err)
 		return false
@@ -103,9 +103,9 @@ func isAKSCluster(t *testing.T) bool {
 
 // verifyGPUNodes checks if the cluster has GPU nodes
 func verifyGPUNodes(t *testing.T) {
-	stdout, stderr, err := runKubectlCommand(t, testTimeout, "get", "nodes", "-o", "wide")
+	stdout, err := runKubectlCommand(t, testTimeout, "get", "nodes", "-o", "wide")
 	if err != nil {
-		t.Errorf("Failed to get nodes: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
+		t.Errorf("Failed to get nodes: %v\nStdout: %s", err, stdout)
 		return
 	}
 

@@ -153,7 +153,7 @@ func runCommand(t *testing.T, timeout time.Duration, args ...string) (string, st
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
-func runKubectlCommand(t *testing.T, timeout time.Duration, args ...string) (string, string, error) {
+func runKubectlCommand(t *testing.T, timeout time.Duration, args ...string) (string, error) {
 	if timeout == 0 {
 		timeout = testTimeout
 	}
@@ -169,15 +169,15 @@ func runKubectlCommand(t *testing.T, timeout time.Duration, args ...string) (str
 
 	err := cmd.Run()
 
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	return strings.TrimSpace(stdout.String()), err
 }
 
 // Common test functions used by both Kind and AKS tests
 
 func verifyClusterReady(t *testing.T) {
-	stdout, stderr, err := runKubectlCommand(t, testTimeout, "get", "nodes")
+	stdout, err := runKubectlCommand(t, testTimeout, "get", "nodes")
 	if err != nil {
-		t.Errorf("Failed to get nodes: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
+		t.Errorf("Failed to get nodes: %v\nStdout: %s", err, stdout)
 		return
 	}
 
@@ -191,15 +191,15 @@ func verifyClusterReady(t *testing.T) {
 
 func verifyKaitoOperator(t *testing.T) {
 	// Check for Kaito operator in kaito-system namespace first
-	stdout, stderr, err := runKubectlCommand(t, longTestTimeout, "get", "deployment", "kaito-controller-manager", "-n", "kaito-system")
+	stdout, err := runKubectlCommand(t, longTestTimeout, "get", "deployment", "kaito-controller-manager", "-n", "kaito-system")
 	if err != nil {
 		// If not found in kaito-system, check in kube-system (AKS managed add-on)
-		stdout, stderr, err = runKubectlCommand(t, longTestTimeout, "get", "deployment", "-n", "kube-system", "-l", "app=ai-toolchain-operator")
+		stdout, err = runKubectlCommand(t, longTestTimeout, "get", "deployment", "-n", "kube-system", "-l", "app=ai-toolchain-operator")
 		if err != nil {
 			// Try checking pods instead
-			stdout, stderr, err = runKubectlCommand(t, longTestTimeout, "get", "pods", "-n", "kube-system", "-l", "app=kaito-workspace")
+			stdout, err = runKubectlCommand(t, longTestTimeout, "get", "pods", "-n", "kube-system", "-l", "app=kaito-workspace")
 			if err != nil {
-				t.Errorf("Failed to get Kaito operator: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
+				t.Errorf("Failed to get Kaito operator: %s\nStderr: %s", err, stdout)
 				return
 			}
 		}

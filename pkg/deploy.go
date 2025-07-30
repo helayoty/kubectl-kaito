@@ -19,7 +19,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -351,29 +350,6 @@ func (o *DeployOptions) createWorkspaceSpec() map[string]interface{} {
 	}
 
 	return spec
-}
-
-func (o *DeployOptions) parseAdapter(adapter string) map[string]interface{} {
-	// Parse adapter format: name=image,strength=value
-	parts := strings.Split(adapter, ",")
-	result := make(map[string]interface{})
-
-	for _, part := range parts {
-		kv := strings.Split(part, "=")
-		if len(kv) == 2 {
-			key := strings.TrimSpace(kv[0])
-			value := strings.TrimSpace(kv[1])
-
-			if key == "strength" {
-				// Try to parse as float
-				result[key] = value
-			} else {
-				result[key] = value
-			}
-		}
-	}
-
-	return result
 }
 
 func (o *DeployOptions) showDryRun() error {

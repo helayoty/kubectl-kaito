@@ -205,7 +205,6 @@ func TestChatOptionsDefaults(t *testing.T) {
 		assert.Equal(t, 0, options.MaxTokens)     // Will be set to 1024 in NewChatCmd
 		assert.Equal(t, 0.0, options.TopP)        // Will be set to 0.9 in NewChatCmd
 		assert.Empty(t, options.SystemPrompt)
-
 	})
 }
 

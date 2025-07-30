@@ -280,63 +280,79 @@ func (o *StatusOptions) printWorkspaceDetails(workspace *unstructured.Unstructur
 	fmt.Printf("Name: %s\n", workspace.GetName())
 	fmt.Printf("Namespace: %s\n", workspace.GetNamespace())
 
+	o.printResourceDetails(workspace)
+	o.printWorkspaceMode(workspace)
+	o.printDeploymentStatus(workspace)
+
+	fmt.Printf("Age: %s\n", o.getAge(workspace))
+	fmt.Println()
+}
+
+func (o *StatusOptions) printResourceDetails(workspace *unstructured.Unstructured) {
 	// Get instance type and count from the top-level resource section (not spec.resource)
 	if resource, found := workspace.Object["resource"]; found {
 		if resourceMap, ok := resource.(map[string]interface{}); ok {
-			if instanceType, found := resourceMap["instanceType"]; found {
-				fmt.Printf("Instance Type: %s\n", instanceType)
+			o.printInstanceDetails(resourceMap)
+			o.printPreferredNodes(resourceMap)
+			o.printNodeSelector(resourceMap)
+		}
+	}
+}
+
+func (o *StatusOptions) printInstanceDetails(resourceMap map[string]interface{}) {
+	if instanceType, found := resourceMap["instanceType"]; found {
+		fmt.Printf("Instance Type: %s\n", instanceType)
+	}
+	if count, found := resourceMap["count"]; found {
+		fmt.Printf("Node Count: %v\n", count)
+	}
+}
+
+func (o *StatusOptions) printPreferredNodes(resourceMap map[string]interface{}) {
+	// Display preferred nodes if available
+	if preferredNodes, found := resourceMap["preferredNodes"]; found {
+		if nodeList, ok := preferredNodes.([]interface{}); ok && len(nodeList) > 0 {
+			fmt.Print("Preferred Nodes: ")
+			for i, node := range nodeList {
+				if i > 0 {
+					fmt.Print(", ")
+				}
+				fmt.Print(node)
 			}
-			if count, found := resourceMap["count"]; found {
-				fmt.Printf("Node Count: %v\n", count)
-			}
-			// Display preferred nodes if available
-			if preferredNodes, found := resourceMap["preferredNodes"]; found {
-				if nodeList, ok := preferredNodes.([]interface{}); ok && len(nodeList) > 0 {
-					fmt.Print("Preferred Nodes: ")
-					for i, node := range nodeList {
-						if i > 0 {
+			fmt.Println()
+		}
+	}
+}
+
+func (o *StatusOptions) printNodeSelector(resourceMap map[string]interface{}) {
+	// Display node selector if available (alternative way to specify preferred nodes)
+	if labelSelector, found := resourceMap["labelSelector"]; found {
+		if labelMap, ok := labelSelector.(map[string]interface{}); ok {
+			if matchLabels, found := labelMap["matchLabels"]; found {
+				if labels, ok := matchLabels.(map[string]interface{}); ok && len(labels) > 0 {
+					fmt.Print("Node Selector: ")
+					first := true
+					for key, value := range labels {
+						if !first {
 							fmt.Print(", ")
 						}
-						fmt.Print(node)
+						fmt.Printf("%s=%v", key, value)
+						first = false
 					}
 					fmt.Println()
 				}
 			}
-			
-			// Display node selector if available (alternative way to specify preferred nodes)
-			if labelSelector, found := resourceMap["labelSelector"]; found {
-				if labelMap, ok := labelSelector.(map[string]interface{}); ok {
-					if matchLabels, found := labelMap["matchLabels"]; found {
-						if labels, ok := matchLabels.(map[string]interface{}); ok && len(labels) > 0 {
-							fmt.Print("Node Selector: ")
-							first := true
-							for key, value := range labels {
-								if !first {
-									fmt.Print(", ")
-								}
-								fmt.Printf("%s=%v", key, value)
-								first = false
-							}
-							fmt.Println()
-						}
-					}
-				}
-			}
 		}
 	}
+}
 
+func (o *StatusOptions) printWorkspaceMode(workspace *unstructured.Unstructured) {
 	// Check if tuning or inference (top-level, not spec.tuning)
 	if _, found := workspace.Object["tuning"]; found {
 		fmt.Println("Mode: Fine-tuning")
 	} else {
 		fmt.Println("Mode: Inference")
 	}
-
-	// Enhanced deployment status information
-	o.printDeploymentStatus(workspace)
-
-	fmt.Printf("Age: %s\n", o.getAge(workspace))
-	fmt.Println()
 }
 
 func (o *StatusOptions) printDeploymentStatus(workspace *unstructured.Unstructured) {
@@ -595,13 +611,14 @@ func (o *StatusOptions) getAge(workspace *unstructured.Unstructured) string {
 
 	duration := time.Since(creationTimestamp.Time)
 
-	if duration.Seconds() < 60 {
+	switch {
+	case duration.Seconds() < 60:
 		return fmt.Sprintf("%ds", int(duration.Seconds()))
-	} else if duration.Minutes() < 60 {
+	case duration.Minutes() < 60:
 		return fmt.Sprintf("%dm", int(duration.Minutes()))
-	} else if duration.Hours() < 24 {
+	case duration.Hours() < 24:
 		return fmt.Sprintf("%dh", int(duration.Hours()))
-	} else {
+	default:
 		return fmt.Sprintf("%dd", int(duration.Hours()/24))
 	}
 }

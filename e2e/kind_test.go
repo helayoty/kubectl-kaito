@@ -70,7 +70,7 @@ func TestKindClusterOperations(t *testing.T) {
 
 // isKindCluster checks if we're connected to a Kind cluster
 func isKindCluster(t *testing.T) bool {
-	stdout, _, err := runKubectlCommand(t, testTimeout, "config", "current-context")
+	stdout, err := runKubectlCommand(t, testTimeout, "config", "current-context")
 	if err != nil {
 		t.Logf("Failed to get current context: %v", err)
 		return false
