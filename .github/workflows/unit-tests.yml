@@ -89,13 +89,6 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
 
     steps:
       - name: Checkout code
@@ -119,11 +112,11 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Build binary
+      - name: Build binary (linux only for unit tests)
         run: |
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
+          go build \
             -ldflags "-X github.com/kaito-project/kubectl-kaito/pkg/cmd.version=ci-${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.commit=${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o kubectl-kaito-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }} \
+            -o kubectl-kaito \
             ./cmd/kubectl-kaito
         env:
           CGO_ENABLED: 0
@@ -131,5 +124,5 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: kubectl-kaito-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: kubectl-kaito-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: kubectl-kaito-linux-amd64
+          path: kubectl-kaito

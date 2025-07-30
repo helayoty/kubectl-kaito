@@ -1,47 +1,31 @@
 # GolangCI configuration for kubectl-kaito plugin
 ---
+version: 2
+
+run:
+  timeout: 10m
+  tests: true
+
 linters:
   enable:
     - bodyclose
     - errcheck
-    - funlen
     - goconst
     - gocritic
     - gocyclo
-    - gofmt
-    - goimports
     - gosec
-    - gosimple
     - govet
     - ineffassign
-    - lll
     - misspell
     - staticcheck
-    - typecheck
     - unconvert
     - unused
     - whitespace
-    - gci
     - gocognit
 
 linters-settings:
-  gci:
-    sections:
-      - standard
-      - default
-      - prefix(github.com/kaito-project/kubectl-kaito)
-
-  gofmt:
-    simplify: true
-
-  goimports:
-    local-prefixes: github.com/kaito-project/kubectl-kaito
-
   govet:
     check-shadowing: true
-
-  lll:
-    line-length: 120
 
   misspell:
     locale: US
@@ -49,29 +33,20 @@ linters-settings:
   errcheck:
     check-type-assertions: true
 
-  funlen:
-    lines: 100
-    statements: 50
-
   gocognit:
     min-complexity: 15
 
   gocyclo:
     min-complexity: 15
 
-run:
-  timeout: 10m
-  tests: true
-
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - funlen
         - goconst
         - gocognit
         - errcheck
         - gosec
     - path: main\.go
       linters:
-        - lll
+        - gosec

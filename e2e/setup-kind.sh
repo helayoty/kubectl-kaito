@@ -15,6 +15,13 @@
 # limitations under the License.
 
 # setup-kind.sh - Setup Kind cluster and prerequisites for e2e tests
+#
+# Environment variables:
+#   KAITO_IMAGE_TAG - Kaito image tag to use (default: 0.3.0)
+#
+# Usage:
+#   ./setup-kind.sh                    # Uses default tag
+#   KAITO_IMAGE_TAG=0.4.0 ./setup-kind.sh  # Uses specific tag
 
 set -e
 
@@ -30,6 +37,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 KIND_CLUSTER_NAME="kaito-e2e-kind"
 TIMEOUT_CLUSTER=10m
 TIMEOUT_INSTALL=5m
+KAITO_IMAGE_TAG="${KAITO_IMAGE_TAG:-0.3.0}"
 
 echo -e "${BLUE}🚀 Setting up Kind cluster and prerequisites for e2e tests${NC}"
 
@@ -157,16 +165,26 @@ echo -e "${BLUE}📦 Installing Kaito helm chart...${NC}"
 # Set kubectl context
 kubectl config use-context "kind-${KIND_CLUSTER_NAME}"
 
-# Add Kaito helm repository
+# Add Kaito helm repository following Kaito project approach
+echo -e "${BLUE}📦 Adding Kaito helm repository...${NC}"
 helm repo add kaito https://azure.github.io/kaito
 helm repo update
 
 # Create kaito-system namespace
+echo -e "${BLUE}🔧 Creating kaito-system namespace...${NC}"
 kubectl create namespace kaito-system --dry-run=client -o yaml | kubectl apply -f -
 
-# Install Kaito operator
+# Install CRDs first (following Kaito pattern)
+echo -e "${BLUE}📋 Installing Kaito CRDs...${NC}"
+kubectl apply -f https://raw.githubusercontent.com/kaito-project/kaito/main/charts/kaito/workspace-crd/crds/kaito.sh_workspaces.yaml
+
+# Install Kaito operator with specific values for Kind
+echo -e "${BLUE}🚀 Installing Kaito operator (tag: ${KAITO_IMAGE_TAG})...${NC}"
 timeout "${TIMEOUT_INSTALL}" helm install kaito kaito/kaito \
     --namespace kaito-system \
+    --set image.repository=mcr.microsoft.com/aks/kaito/workspace \
+    --set image.tag="${KAITO_IMAGE_TAG}" \
+    --set nodeProvisioner.enabled=false \
     --wait \
     --timeout 300s
 
