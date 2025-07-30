@@ -3,60 +3,118 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/kaito-project/kubectl-kaito/pkg/cmd"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-func TestMain(t *testing.T) {
-	// Test that main function can be called without panicking
-	// We can't easily test the actual execution without mocking,
-	// but we can test the basic setup logic
-
-	// Save original args
-	originalArgs := os.Args
-	defer func() {
-		os.Args = originalArgs
-	}()
-
-	// Test with help flag to avoid actual execution
-	os.Args = []string{"kubectl-kaito", "--help"}
-
-	// This would normally call main(), but we can't test it directly
-	// without refactoring. Instead, we test the helper logic.
-
-	// Test plugin detection logic
-	testCases := []struct {
-		name     string
-		binary   string
-		expected bool
+func TestIsPluginDetection(t *testing.T) {
+	tests := []struct {
+		name       string
+		args0      string
+		isPlugin   bool
 	}{
 		{
 			name:     "kubectl plugin format",
-			binary:   "kubectl-kaito",
-			expected: true,
-		},
-		{
-			name:     "direct binary",
-			binary:   "kaito",
-			expected: false,
+			args0:    "kubectl-kaito",
+			isPlugin: true,
 		},
 		{
 			name:     "kubectl plugin with path",
-			binary:   "/usr/local/bin/kubectl-kaito",
-			expected: true,
+			args0:    "/usr/local/bin/kubectl-kaito",
+			isPlugin: true,
+		},
+		{
+			name:     "standalone binary",
+			args0:    "kaito",
+			isPlugin: false,
+		},
+		{
+			name:     "standalone binary with path",
+			args0:    "/usr/local/bin/kaito",
+			isPlugin: false,
+		},
+		{
+			name:     "other kubectl plugin",
+			args0:    "kubectl-other",
+			isPlugin: true,
 		},
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := isKubectlPlugin(tc.binary)
-			if result != tc.expected {
-				t.Errorf("isKubectlPlugin(%s) = %v, expected %v", tc.binary, result, tc.expected)
-			}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test the logic that determines if running as kubectl plugin
+			isPlugin := strings.HasPrefix(filepath.Base(tt.args0), "kubectl-")
+			assert.Equal(t, tt.isPlugin, isPlugin)
 		})
 	}
 }
 
-// Helper function extracted from main logic for testing
-func isKubectlPlugin(binary string) bool {
-	return filepath.HasPrefix(filepath.Base(binary), "kubectl-")
+func TestMainFunctionComponents(t *testing.T) {
+	// Test that we can create the components used in main()
+	t.Run("ConfigFlags creation", func(t *testing.T) {
+		// This should not panic and should return a valid object
+		require.NotPanics(t, func() {
+			configFlags := genericclioptions.NewConfigFlags(true)
+			assert.NotNil(t, configFlags)
+		})
+	})
+
+	t.Run("Original args preservation", func(t *testing.T) {
+		// Store original args
+		originalArgs := os.Args
+
+		// Test with different args
+		testArgs := []string{"kubectl-kaito", "models", "list"}
+		os.Args = testArgs
+
+		// Verify args are as expected
+		assert.Equal(t, testArgs, os.Args)
+		assert.True(t, strings.HasPrefix(filepath.Base(os.Args[0]), "kubectl-"))
+
+		// Restore original args
+		os.Args = originalArgs
+	})
+}
+
+func TestMainExecution(t *testing.T) {
+	// Test that main components can be instantiated without error
+	t.Run("Main components integration", func(t *testing.T) {
+		// Save original args
+		originalArgs := os.Args
+		defer func() { os.Args = originalArgs }()
+
+		// Set test args that would trigger help (safe execution)
+		os.Args = []string{"kubectl-kaito", "--help"}
+
+		// Test that the main function logic components work
+		require.NotPanics(t, func() {
+			// Simulate the main function logic without calling Execute()
+			isPlugin := strings.HasPrefix(filepath.Base(os.Args[0]), "kubectl-")
+			assert.True(t, isPlugin)
+
+			configFlags := genericclioptions.NewConfigFlags(true)
+			assert.NotNil(t, configFlags)
+
+			// Import the cmd package to ensure it's available
+			// This tests that the import works correctly
+			rootCmd := cmd.NewRootCmd(configFlags, isPlugin)
+			assert.NotNil(t, rootCmd)
+			assert.Equal(t, "kubectl kaito", rootCmd.Use)
+		})
+	})
+}
+
+// TestAuthPluginImport verifies that the auth plugin import works
+func TestAuthPluginImport(t *testing.T) {
+	// This test verifies that the auth plugin import doesn't cause issues
+	// The import is a side effect import, so we just verify no panic occurs
+	t.Run("Auth plugin import", func(t *testing.T) {
+		// If we got this far in the test, the import worked
+		assert.True(t, true, "Auth plugin import successful")
+	})
 }

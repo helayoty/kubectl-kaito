@@ -1,0 +1,175 @@
+package cmd
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+)
+
+func TestSimpleStatusCmd(t *testing.T) {
+	configFlags := genericclioptions.NewConfigFlags(true)
+	cmd := NewStatusCmd(configFlags)
+
+	t.Run("Command structure", func(t *testing.T) {
+		assert.Equal(t, "status", cmd.Use)
+		assert.Contains(t, cmd.Short, "status")
+		assert.NotEmpty(t, cmd.Long)
+		assert.NotEmpty(t, cmd.Example)
+		assert.NotNil(t, cmd.RunE)
+	})
+
+	t.Run("Flags present", func(t *testing.T) {
+		flags := cmd.Flags()
+
+		workspaceFlag := flags.Lookup("workspace-name")
+		assert.NotNil(t, workspaceFlag)
+
+		allNamespacesFlag := flags.Lookup("all-namespaces")
+		assert.NotNil(t, allNamespacesFlag)
+
+		watchFlag := flags.Lookup("watch")
+		assert.NotNil(t, watchFlag)
+	})
+}
+
+func TestSimpleStatusOptionsValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		options     StatusOptions
+		expectError bool
+	}{
+		{
+			name: "Valid options",
+			options: StatusOptions{
+				WorkspaceName: "test-workspace",
+				Namespace:     "default",
+			},
+			expectError: false,
+		},
+		{
+			name: "Conflicting namespace options",
+			options: StatusOptions{
+				Namespace:     "default",
+				AllNamespaces: true,
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.options.validate()
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestSimpleGetInstanceType(t *testing.T) {
+	tests := []struct {
+		name       string
+		workspace  *unstructured.Unstructured
+		expected   string
+	}{
+		{
+			name: "With instance type",
+			workspace: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"spec": map[string]interface{}{
+						"resource": map[string]interface{}{
+							"instanceType": "Standard_NC6s_v3",
+						},
+					},
+				},
+			},
+			expected: "Standard_NC6s_v3",
+		},
+		{
+			name: "Missing instance type",
+			workspace: &unstructured.Unstructured{
+				Object: map[string]interface{}{},
+			},
+			expected: "Unknown",
+		},
+	}
+
+	options := &StatusOptions{}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := options.getInstanceType(tt.workspace)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSimpleGetConditionStatus(t *testing.T) {
+	tests := []struct {
+		name          string
+		workspace     *unstructured.Unstructured
+		conditionType string
+		expected      string
+	}{
+		{
+			name: "Condition found",
+			workspace: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"status": map[string]interface{}{
+						"conditions": []interface{}{
+							map[string]interface{}{
+								"type":   "ResourceReady",
+								"status": "True",
+							},
+						},
+					},
+				},
+			},
+			conditionType: "ResourceReady",
+			expected:      "True",
+		},
+		{
+			name: "Condition not found",
+			workspace: &unstructured.Unstructured{
+				Object: map[string]interface{}{},
+			},
+			conditionType: "ResourceReady",
+			expected:      "Unknown",
+		},
+	}
+
+	options := &StatusOptions{}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := options.getConditionStatus(tt.workspace, tt.conditionType)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSimpleGetAge(t *testing.T) {
+	now := time.Now()
+	oneHourAgo := now.Add(-time.Hour)
+
+	workspace := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"creationTimestamp": oneHourAgo.Format(time.RFC3339),
+			},
+		},
+	}
+
+	options := &StatusOptions{}
+	result := options.getAge(workspace)
+	
+	// Should contain some time duration
+	assert.NotEqual(t, "<unknown>", result)
+	assert.NotEmpty(t, result)
+}
