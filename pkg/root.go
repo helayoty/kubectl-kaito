@@ -63,8 +63,10 @@ in Kubernetes clusters through Kaito workspaces.`,
 		},
 	}
 
-	// Add global flags from kubectl
-	configFlags.AddFlags(cmd.PersistentFlags())
+	// Add only essential global flags for Kaito users
+	cmd.PersistentFlags().StringVar(configFlags.KubeConfig, "kubeconfig", *configFlags.KubeConfig, "Path to the kubeconfig file to use for CLI requests")
+	cmd.PersistentFlags().StringVar(configFlags.Context, "context", *configFlags.Context, "The name of the kubeconfig context to use")
+	cmd.PersistentFlags().StringVarP(configFlags.Namespace, "namespace", "n", *configFlags.Namespace, "If present, the namespace scope for this CLI request")
 
 	// Add subcommands
 	cmd.AddCommand(NewDeployCmd(configFlags))

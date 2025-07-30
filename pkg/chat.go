@@ -49,7 +49,6 @@ type ChatOptions struct {
 	Temperature   float64
 	MaxTokens     int
 	TopP          float64
-	Stream        bool
 }
 
 // NewChatCmd creates the chat command
@@ -59,7 +58,6 @@ func NewChatCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		Temperature: 0.7,
 		MaxTokens:   1024,
 		TopP:        0.9,
-		Stream:      false,
 	}
 
 	cmd := &cobra.Command{
@@ -95,7 +93,6 @@ OpenAI-compatible APIs in interactive mode.`,
 	cmd.Flags().Float64Var(&o.Temperature, "temperature", 0.7, "Temperature for response generation (0.0-2.0)")
 	cmd.Flags().IntVar(&o.MaxTokens, "max-tokens", 1024, "Maximum tokens in response")
 	cmd.Flags().Float64Var(&o.TopP, "top-p", 0.9, "Top-p (nucleus sampling) parameter (0.0-1.0)")
-	cmd.Flags().BoolVar(&o.Stream, "stream", false, "Enable streaming responses")
 
 	if err := cmd.MarkFlagRequired("workspace-name"); err != nil {
 		klog.Errorf("Failed to mark workspace-name flag as required: %v", err)
@@ -415,13 +412,12 @@ func (o *ChatOptions) handleCommand(command, modelName string) bool {
 			fmt.Printf("  Temperature: %.1f\n", o.Temperature)
 	fmt.Printf("  Max tokens: %d\n", o.MaxTokens)
 	fmt.Printf("  Top-p: %.1f\n", o.TopP)
-	fmt.Printf("  Stream: %t\n", o.Stream)
 		fmt.Println()
 
 	case "/set":
 		if len(parts) < 3 {
 			fmt.Println("Usage: /set <parameter> <value>")
-			fmt.Println("Available parameters: temperature, max_tokens, top_p, stream")
+			fmt.Println("Available parameters: temperature, max_tokens, top_p")
 			fmt.Println()
 			return false
 		}
@@ -464,19 +460,13 @@ func (o *ChatOptions) setParameter(param, value string) {
 			fmt.Println("Invalid top_p value. Must be between 0.0 and 1.0")
 		}
 
-	case "stream":
-		if stream, err := strconv.ParseBool(value); err == nil {
-			o.Stream = stream
-			fmt.Printf("Stream set to %t\n", stream)
-		} else {
-			fmt.Println("Invalid stream value. Must be true or false")
-		}
+	
 
 	
 
 	default:
 		fmt.Printf("Unknown parameter: %s\n", param)
-		fmt.Println("Available parameters: temperature, max_tokens, top_p, stream")
+		fmt.Println("Available parameters: temperature, max_tokens, top_p")
 	}
 	fmt.Println()
 }
@@ -495,7 +485,6 @@ func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {
 		"temperature": o.Temperature,
 		"max_tokens":  o.MaxTokens,
 		"top_p":       o.TopP,
-		"stream":      o.Stream,
 	}
 
 	// Add system prompt if provided

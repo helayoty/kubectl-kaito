@@ -56,7 +56,6 @@ func TestNewChatCmd(t *testing.T) {
 			"top-p",
 			"max-tokens",
 			"system-prompt",
-			"stream",
 		}
 
 		for _, flagName := range optionalFlags {
@@ -68,10 +67,10 @@ func TestNewChatCmd(t *testing.T) {
 	t.Run("Flag aliases", func(t *testing.T) {
 		flags := cmd.Flags()
 
-		// Check short alias for message
-		messageFlag := flags.ShorthandLookup("m")
-		assert.NotNil(t, messageFlag)
-		assert.Equal(t, "message", messageFlag.Name)
+		// Check short alias for namespace
+		namespaceFlag := flags.ShorthandLookup("n")
+		assert.NotNil(t, namespaceFlag)
+		assert.Equal(t, "namespace", namespaceFlag.Name)
 	})
 }
 
@@ -201,12 +200,11 @@ func TestChatOptionsDefaults(t *testing.T) {
 
 		assert.Empty(t, options.WorkspaceName)
 		assert.Empty(t, options.Namespace)
-		assert.Empty(t, options.Message)
+
 		assert.Equal(t, 0.0, options.Temperature) // Will be set to 0.7 in NewChatCmd
 		assert.Equal(t, 0, options.MaxTokens)     // Will be set to 1024 in NewChatCmd
-		assert.Equal(t, 0.0, options.TopP)       // Will be set to 0.9 in NewChatCmd
+		assert.Equal(t, 0.0, options.TopP)        // Will be set to 0.9 in NewChatCmd
 		assert.Empty(t, options.SystemPrompt)
-		assert.False(t, options.Stream)
 
 	})
 }
@@ -305,7 +303,7 @@ func TestChatCommandIntegration(t *testing.T) {
 
 		// Test that default values are set correctly in the command
 		flags := cmd.Flags()
-		
+
 		tempFlag := flags.Lookup("temperature")
 		assert.NotNil(t, tempFlag)
 		assert.Equal(t, "0.7", tempFlag.DefValue)
@@ -319,4 +317,3 @@ func TestChatCommandIntegration(t *testing.T) {
 		assert.Equal(t, "0.9", topPFlag.DefValue)
 	})
 }
-
