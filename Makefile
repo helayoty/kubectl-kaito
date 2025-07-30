@@ -43,9 +43,34 @@ unit-tests:
 
 # Run e2e tests
 .PHONY: test-e2e
-test-e2e:
-	@echo "Running e2e tests (basic functionality)..."
-	cd e2e && go test -v -timeout=10m ./...
+test-e2e: test-e2e-basic test-e2e-kind
+	@echo "E2E tests completed (excluding AKS tests)"
+
+# Run basic e2e tests (no cluster required)
+.PHONY: test-e2e-basic
+test-e2e-basic:
+	@echo "Running basic e2e tests (no cluster required)..."
+	cd e2e && go test -v -timeout=5m -run "TestBasicHelp|TestModelsCommand|TestInputValidation"
+
+# Run e2e tests with Kind cluster
+.PHONY: test-e2e-kind
+test-e2e-kind:
+	@echo "Running e2e tests with Kind cluster..."
+	cd e2e && go test -v -timeout=15m -run "TestKindClusterOperations"
+
+# Run e2e tests with AKS cluster (creates billable resources)
+.PHONY: test-e2e-aks
+test-e2e-aks:
+	@echo "Warning: This will create billable Azure resources!"
+	@echo "Running e2e tests with AKS cluster..."
+	cd e2e && go test -v -timeout=30m -run "TestAKSClusterOperations"
+
+# Run all e2e tests including AKS (creates billable resources)
+.PHONY: test-e2e-all
+test-e2e-all:
+	@echo "Warning: This will create billable Azure resources!"
+	@echo "Running all e2e tests..."
+	cd e2e && go test -v -timeout=35m ./...
 
 # Lint the code
 .PHONY: lint
@@ -207,7 +232,11 @@ help:
 	@echo "  build        - Build the binary to bin/"
 	@echo "  build-all    - Build for multiple platforms"
 	@echo "  unit-tests   - Run unit tests with race detection and coverage"
-	@echo "  test-e2e     - Run e2e tests (basic functionality)"
+	@echo "  test-e2e     - Run e2e tests (basic + Kind cluster)"
+	@echo "  test-e2e-basic - Run basic e2e tests (no cluster)"
+	@echo "  test-e2e-kind - Run e2e tests with Kind cluster"
+	@echo "  test-e2e-aks - Run e2e tests with AKS cluster (billable)"
+	@echo "  test-e2e-all - Run all e2e tests including AKS (billable)"
 	@echo "  lint         - Lint the code"
 	@echo "  fmt          - Format the code"
 	@echo "  vet          - Vet the code"

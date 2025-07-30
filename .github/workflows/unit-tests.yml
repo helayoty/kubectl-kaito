@@ -142,7 +142,7 @@ jobs:
       - name: Build binary
         run: |
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build \
-            -ldflags "-X github.com/kaito-project/kubectl-kaito/pkg/cmd.version=ci-${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.commit=${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -ldflags "-X github.com/kaito-project/kubectl-kaito/pkg.version=ci-${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg.commit=${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o kubectl-kaito-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }} \
             ./cmd/kubectl-kaito
         env:

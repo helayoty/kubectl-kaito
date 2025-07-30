@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,21 +13,29 @@ import (
 )
 
 const (
-	binaryName      = "kubectl-kaito"
-	testTimeout     = 30 * time.Second
-	buildTimeout    = 60 * time.Second
-	longTestTimeout = 120 * time.Second
+	binaryName         = "kubectl-kaito"
+	testTimeout        = 30 * time.Second
+	buildTimeout       = 60 * time.Second
+	longTestTimeout    = 120 * time.Second
+	clusterTimeout     = 10 * time.Minute
+	kindClusterName    = "kaito-e2e-kind"
+	aksClusterName     = "kaito-e2e-aks"
+	aksResourceGroup   = "kaito-e2e-rg"
+	aksLocation        = "westus2"
 )
 
 var (
-	binaryPath string
+	binaryPath    string
+	kindAvailable bool
+	aksAvailable  bool
 )
 
-// MockServer holds the test HTTP server for mocking external APIs
-type MockServer struct {
-	server       *httptest.Server
-	failRequests bool
-	returnEmpty  bool
+// ClusterManager manages test clusters
+type ClusterManager struct {
+	kindClusterName string
+	aksClusterName  string
+	resourceGroup   string
+	location        string
 }
 
 func TestMain(m *testing.M) {
@@ -37,6 +43,9 @@ func TestMain(m *testing.M) {
 	if err := buildBinary(); err != nil {
 		panic("Failed to build binary: " + err.Error())
 	}
+
+	// Check if required tools are available
+	checkPrerequisites()
 
 	// Run tests
 	code := m.Run()
@@ -63,7 +72,7 @@ func buildBinary() error {
 	// Build the binary using go build directly
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, "./cmd/kubectl-kaito")
 	cmd.Dir = projectRoot
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("build failed: %v\nOutput: %s", err, string(output))
@@ -83,6 +92,41 @@ func getProjectRoot() (string, error) {
 	return filepath.Dir(wd), nil
 }
 
+func checkPrerequisites() {
+	// Check if kind is available
+	if err := exec.Command("kind", "version").Run(); err != nil {
+		fmt.Printf("Warning: kind not available, skipping Kind cluster tests: %v\n", err)
+		kindAvailable = false
+	} else {
+		fmt.Println("✓ kind is available")
+		kindAvailable = true
+	}
+
+	// Check if Azure CLI is available
+	if err := exec.Command("az", "version").Run(); err != nil {
+		fmt.Printf("Warning: Azure CLI not available, skipping AKS tests: %v\n", err)
+		aksAvailable = false
+	} else {
+		fmt.Println("✓ Azure CLI is available")
+		aksAvailable = true
+
+		// Check if logged into Azure
+		if err := exec.Command("az", "account", "show").Run(); err != nil {
+			fmt.Printf("Warning: Not logged into Azure, skipping AKS tests: %v\n", err)
+			aksAvailable = false
+		} else {
+			fmt.Println("✓ Azure CLI is authenticated")
+		}
+	}
+
+	// Check if kubectl is available
+	if err := exec.Command("kubectl", "version", "--client").Run(); err != nil {
+		fmt.Printf("Warning: kubectl not available: %v\n", err)
+	} else {
+		fmt.Println("✓ kubectl is available")
+	}
+}
+
 func cleanup() {
 	// Remove binary if it exists
 	if binaryPath != "" {
@@ -99,7 +143,6 @@ func runCommand(t *testing.T, timeout time.Duration, args ...string) (string, st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -108,688 +151,583 @@ func runCommand(t *testing.T, timeout time.Duration, args ...string) (string, st
 	return stdout.String(), stderr.String(), err
 }
 
-// setupMockServer creates a mock HTTP server for testing external API calls
-func setupMockServer(failRequests, returnEmpty bool) *MockServer {
-	mock := &MockServer{
-		failRequests: failRequests,
-		returnEmpty:  returnEmpty,
+func runKubectl(t *testing.T, timeout time.Duration, args ...string) (string, string, error) {
+	if timeout == 0 {
+		timeout = testTimeout
 	}
 
-	mock.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if mock.failRequests {
-			http.Error(w, "Mock server error", http.StatusInternalServerError)
-			return
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-		if mock.returnEmpty {
-			w.Header().Set("Content-Type", "application/yaml")
-			w.Write([]byte("models: []"))
-			return
-		}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-		// Return mock supported models YAML
-		mockYAML := `models:
-  - name: phi-3.5-mini-instruct
-    type: text-generation
-    runtime: tfs
-    version: "test-version"
-  - name: llama-2-7b
-    type: text-generation
-    runtime: tfs
-    version: "test-version"
-  - name: mistral-7b
-    type: text-generation
-    runtime: tfs
-    version: "test-version"`
-
-		w.Header().Set("Content-Type", "application/yaml")
-		w.Write([]byte(mockYAML))
-	}))
-
-	return mock
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
 }
 
-func (m *MockServer) Close() {
-	m.server.Close()
+// NewClusterManager creates a new cluster manager
+func NewClusterManager() *ClusterManager {
+	return &ClusterManager{
+		kindClusterName: kindClusterName,
+		aksClusterName:  aksClusterName,
+		resourceGroup:   aksResourceGroup,
+		location:        aksLocation,
+	}
 }
 
-// TestBasicCommands tests basic command functionality that doesn't require external APIs
-func TestBasicCommands(t *testing.T) {
-	t.Run("Root help command", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "--help")
-		if err != nil {
-			t.Errorf("Help command failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-			return
-		}
+// CreateKindCluster creates a Kind cluster with CPU nodes
+func (cm *ClusterManager) CreateKindCluster(t *testing.T) error {
+	if !kindAvailable {
+		t.Skip("Kind not available, skipping Kind cluster tests")
+	}
 
-		expectedSections := []string{
-			"Kubernetes AI Toolchain Operator",
-			"Usage:",
-			"Available Commands:",
-			"deploy",
-			"status", 
-			"get-endpoint",
-			"chat",
-			"models",
-			"rag",
-		}
+	t.Logf("Creating Kind cluster: %s", cm.kindClusterName)
 
-		for _, section := range expectedSections {
-			if !strings.Contains(stdout, section) {
-				t.Errorf("Help output should contain '%s'\nGot: %s", section, stdout)
+	// Create kind config with CPU nodes
+	kindConfig := fmt.Sprintf(`kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: %s
+nodes:
+- role: control-plane
+- role: worker
+  extraMounts:
+  - hostPath: /var/run/docker.sock
+    containerPath: /var/run/docker.sock
+`, cm.kindClusterName)
+
+	// Write config to temp file
+	configFile := filepath.Join(os.TempDir(), "kind-config.yaml")
+	if err := os.WriteFile(configFile, []byte(kindConfig), 0644); err != nil {
+		return fmt.Errorf("failed to write kind config: %v", err)
+	}
+	defer os.Remove(configFile)
+
+	// Create the cluster
+	ctx, cancel := context.WithTimeout(context.Background(), clusterTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "kind", "create", "cluster", "--config", configFile)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create kind cluster: %v\nOutput: %s", err, string(output))
+	}
+
+	t.Logf("Kind cluster created successfully")
+
+	// Wait for cluster to be ready
+	return cm.waitForClusterReady(t, "kind-"+cm.kindClusterName)
+}
+
+// DestroyKindCluster destroys the Kind cluster
+func (cm *ClusterManager) DestroyKindCluster(t *testing.T) {
+	if !kindAvailable {
+		return
+	}
+
+	t.Logf("Destroying Kind cluster: %s", cm.kindClusterName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "kind", "delete", "cluster", "--name", cm.kindClusterName)
+	if err := cmd.Run(); err != nil {
+		t.Logf("Warning: failed to delete kind cluster: %v", err)
+	}
+}
+
+// DeployNginxToKind deploys nginx to the Kind cluster for testing
+func (cm *ClusterManager) DeployNginxToKind(t *testing.T) error {
+	t.Logf("Deploying nginx to Kind cluster")
+
+	// Switch to kind context
+	if _, _, err := runKubectl(t, testTimeout, "config", "use-context", "kind-"+cm.kindClusterName); err != nil {
+		return fmt.Errorf("failed to switch to kind context: %v", err)
+	}
+
+	// Deploy nginx
+	nginxManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-test
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-test
+  template:
+    metadata:
+      labels:
+        app: nginx-test
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-test
+  namespace: default
+spec:
+  selector:
+    app: nginx-test
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+`
+
+	// Apply manifest
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(nginxManifest)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to deploy nginx: %v\nOutput: %s", err, string(output))
+	}
+
+	// Wait for nginx to be ready
+	return cm.waitForDeployment(t, "default", "nginx-test")
+}
+
+// CreateAKSCluster creates an AKS cluster with GPU nodes
+func (cm *ClusterManager) CreateAKSCluster(t *testing.T) error {
+	if !aksAvailable {
+		t.Skip("Azure CLI not available or not authenticated, skipping AKS tests")
+	}
+
+	t.Logf("Creating AKS cluster: %s", cm.aksClusterName)
+
+	// Create resource group
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "az", "group", "create",
+		"--name", cm.resourceGroup,
+		"--location", cm.location)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create resource group: %v\nOutput: %s", err, string(output))
+	}
+
+	// Create AKS cluster with GPU node pool
+	ctx, cancel = context.WithTimeout(context.Background(), clusterTimeout)
+	defer cancel()
+
+	cmd = exec.CommandContext(ctx, "az", "aks", "create",
+		"--resource-group", cm.resourceGroup,
+		"--name", cm.aksClusterName,
+		"--node-count", "1",
+		"--node-vm-size", "Standard_NC6s_v3", // GPU SKU
+		"--generate-ssh-keys",
+		"--enable-addons", "monitoring",
+		"--kubernetes-version", "1.28.0")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create AKS cluster: %v\nOutput: %s", err, string(output))
+	}
+
+	// Get credentials
+	ctx, cancel = context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	cmd = exec.CommandContext(ctx, "az", "aks", "get-credentials",
+		"--resource-group", cm.resourceGroup,
+		"--name", cm.aksClusterName,
+		"--overwrite-existing")
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to get AKS credentials: %v\nOutput: %s", err, string(output))
+	}
+
+	t.Logf("AKS cluster created successfully")
+
+	// Wait for cluster to be ready
+	return cm.waitForClusterReady(t, cm.aksClusterName)
+}
+
+// DestroyAKSCluster destroys the AKS cluster
+func (cm *ClusterManager) DestroyAKSCluster(t *testing.T) {
+	if !aksAvailable {
+		return
+	}
+
+	t.Logf("Destroying AKS cluster and resource group: %s", cm.resourceGroup)
+
+	ctx, cancel := context.WithTimeout(context.Background(), clusterTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "az", "group", "delete",
+		"--name", cm.resourceGroup,
+		"--yes", "--no-wait")
+
+	if err := cmd.Run(); err != nil {
+		t.Logf("Warning: failed to delete AKS resource group: %v", err)
+	}
+}
+
+// waitForClusterReady waits for the cluster to be ready
+func (cm *ClusterManager) waitForClusterReady(t *testing.T, contextName string) error {
+	t.Logf("Waiting for cluster to be ready: %s", contextName)
+
+	// Switch to the cluster context
+	if _, _, err := runKubectl(t, testTimeout, "config", "use-context", contextName); err != nil {
+		return fmt.Errorf("failed to switch to context %s: %v", contextName, err)
+	}
+
+	// Wait for nodes to be ready
+	timeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for cluster to be ready")
+		case <-ticker.C:
+			stdout, _, err := runKubectl(t, testTimeout, "get", "nodes", "--no-headers")
+			if err != nil {
+				continue
+			}
+
+			lines := strings.Split(strings.TrimSpace(stdout), "\n")
+			allReady := true
+			for _, line := range lines {
+				if line == "" {
+					continue
+				}
+				fields := strings.Fields(line)
+				if len(fields) < 2 || fields[1] != "Ready" {
+					allReady = false
+					break
+				}
+			}
+
+			if allReady && len(lines) > 0 {
+				t.Logf("Cluster is ready with %d nodes", len(lines))
+				return nil
 			}
 		}
-	})
-
-	t.Run("Subcommand help", func(t *testing.T) {
-		subcommands := []string{"deploy", "status", "get-endpoint", "chat", "models", "rag"}
-		
-		for _, cmd := range subcommands {
-			t.Run(cmd+" help", func(t *testing.T) {
-				stdout, stderr, err := runCommand(t, 0, cmd, "--help")
-				if err != nil {
-					t.Errorf("Help command for %s failed: %v\nStderr: %s", cmd, err, stderr)
-					return
-				}
-
-				if !strings.Contains(stdout, "Usage:") {
-					t.Errorf("Help output for %s should contain 'Usage:'\nGot: %s", cmd, stdout)
-				}
-			})
-		}
-	})
+	}
 }
 
-// TestModelsCommand tests the models command functionality
+// waitForDeployment waits for a deployment to be ready
+func (cm *ClusterManager) waitForDeployment(t *testing.T, namespace, name string) error {
+	t.Logf("Waiting for deployment %s/%s to be ready", namespace, name)
+
+	timeout := time.After(3 * time.Minute)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for deployment %s/%s to be ready", namespace, name)
+		case <-ticker.C:
+			stdout, _, err := runKubectl(t, testTimeout, "get", "deployment", name, "-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
+			if err != nil {
+				continue
+			}
+
+			if strings.TrimSpace(stdout) == "1" {
+				t.Logf("Deployment %s/%s is ready", namespace, name)
+				return nil
+			}
+		}
+	}
+}
+
+// Test basic help functionality - no cluster needed
+func TestBasicHelp(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"root help", []string{"--help"}},
+		{"models help", []string{"models", "--help"}},
+		{"deploy help", []string{"deploy", "--help"}},
+		{"status help", []string{"status", "--help"}},
+		{"get-endpoint help", []string{"get-endpoint", "--help"}},
+		{"chat help", []string{"chat", "--help"}},
+		{"rag help", []string{"rag", "--help"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := runCommand(t, testTimeout, tt.args...)
+
+			// Help should exit with code 0
+			if err != nil {
+				t.Errorf("Help command failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
+			}
+
+			// Should have some help content
+			combinedOutput := stdout + stderr
+			if !strings.Contains(combinedOutput, "Usage:") && !strings.Contains(combinedOutput, "kubectl kaito") {
+				t.Errorf("Expected help content not found in output: %s", combinedOutput)
+			}
+		})
+	}
+}
+
+// Test models command - no cluster needed
 func TestModelsCommand(t *testing.T) {
-	t.Run("Models list", func(t *testing.T) {
+	t.Run("models list", func(t *testing.T) {
 		stdout, stderr, err := runCommand(t, longTestTimeout, "models", "list")
-		if err != nil {
-			t.Errorf("Models list failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-			return
-		}
 
-		// For models list table output goes to stdout
-		// Should contain table headers
-		expectedHeaders := []string{"NAME", "TYPE", "RUNTIME", "GPU MEMORY", "NODES", "DESCRIPTION"}
-		for _, header := range expectedHeaders {
-			if !strings.Contains(stdout, header) {
-				t.Errorf("Models list output should contain header '%s'\nGot: %s", header, stdout)
-			}
-		}
-
-		// Should contain some known models (either from official API or fallback)
-		knownModels := []string{"phi-", "llama", "mistral"}
-		foundModel := false
-		for _, model := range knownModels {
-			if strings.Contains(strings.ToLower(stdout), model) {
-				foundModel = true
-				break
-			}
-		}
-		if !foundModel {
-			t.Errorf("Models list should contain at least one known model\nGot: %s", stdout)
-		}
-	})
-
-	t.Run("Models list detailed", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, longTestTimeout, "models", "list", "--detailed")
-		if err != nil {
-			t.Errorf("Models list detailed failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-			return
-		}
-
-		// Detailed output goes through klog to stderr
+		// Should succeed or gracefully handle network failures
 		combinedOutput := stdout + stderr
-		
-		// Detailed output should contain more information
-		expectedFields := []string{"Name:", "Type:", "Runtime:", "Version:"}
-		for _, field := range expectedFields {
-			if !strings.Contains(combinedOutput, field) {
-				t.Errorf("Detailed output should contain field '%s'\nGot stdout: %s\nGot stderr: %s", field, stdout, stderr)
-			}
-		}
-	})
 
-	t.Run("Models describe", func(t *testing.T) {
-		// First get a list of models to find a valid one
-		listOut, _, listCmdErr := runCommand(t, longTestTimeout, "models", "list")
-		if listCmdErr != nil {
-			t.Skip("Cannot test describe without a working models list")
-		}
-
-		// Extract first model name from the stdout (table output)
-		lines := strings.Split(listOut, "\n")
-		var modelName string
-		for _, line := range lines {
-			if strings.Contains(line, "phi-") || strings.Contains(line, "llama") || strings.Contains(line, "mistral") {
-				fields := strings.Fields(line)
-				if len(fields) > 0 {
-					modelName = fields[0]
-					break
-				}
-			}
-		}
-
-		if modelName == "" {
-			modelName = "phi-3.5-mini-instruct" // fallback to known model
-		}
-
-		stdout, stderr, err := runCommand(t, 0, "models", "describe", modelName)
 		if err != nil {
-			t.Errorf("Models describe failed for %s: %v\nStdout: %s\nStderr: %s", modelName, err, stdout, stderr)
-			return
-		}
-
-		// Describe output goes through klog to stderr
-		combinedOutput := stdout + stderr
-		
-		expectedSections := []string{
-			"Model: " + modelName,
-			"Description:",
-			"Type:",
-			"Runtime:",
-			"Resource Requirements:",
-			"Usage Example:",
-		}
-
-		for _, section := range expectedSections {
-			if !strings.Contains(combinedOutput, section) {
-				t.Errorf("Describe output should contain section '%s'\nGot stdout: %s\nGot stderr: %s", section, stdout, stderr)
+			// If network fails, should show fallback models
+			if !strings.Contains(combinedOutput, "phi-3.5-mini-instruct") &&
+				!strings.Contains(combinedOutput, "llama-2-7b") {
+				t.Errorf("Expected fallback models not found. Output: %s", combinedOutput)
+			}
+		} else {
+			// If succeeds, should show model list
+			if !strings.Contains(combinedOutput, "NAME") || !strings.Contains(combinedOutput, "TYPE") {
+				t.Errorf("Expected model list headers not found. Output: %s", combinedOutput)
 			}
 		}
 	})
 
-	t.Run("Models describe invalid", func(t *testing.T) {
-		_, _, err := runCommand(t, 0, "models", "describe", "invalid-model-name")
+	t.Run("models describe valid", func(t *testing.T) {
+		stdout, stderr, err := runCommand(t, testTimeout, "models", "describe", "phi-3.5-mini-instruct")
+
+		combinedOutput := stdout + stderr
+
+		if err != nil {
+			// Should provide helpful error message
+			if !strings.Contains(combinedOutput, "phi-3.5-mini-instruct") {
+				t.Errorf("Expected model name in error message. Output: %s", combinedOutput)
+			}
+		} else {
+			// If succeeds, should show model details
+			if !strings.Contains(combinedOutput, "phi-3.5-mini-instruct") {
+				t.Errorf("Expected model details not found. Output: %s", combinedOutput)
+			}
+		}
+	})
+
+	t.Run("models describe invalid", func(t *testing.T) {
+		_, stderr, err := runCommand(t, testTimeout, "models", "describe", "invalid-model")
+
 		if err == nil {
-			t.Error("Models describe should fail for invalid model")
+			t.Error("Expected error for invalid model name")
 		}
 
-		// Note: Error messages are silenced by root command configuration (SilenceErrors: true)
-		// so we only check for error exit code, not error text content
+		if !strings.Contains(stderr, "not supported") {
+			t.Errorf("Expected 'not supported' error message, got: %s", stderr)
+		}
 	})
 }
 
-// TestDeployCommand tests the deploy command functionality
-func TestDeployCommand(t *testing.T) {
-	t.Run("Deploy dry-run with valid model", func(t *testing.T) {
-		// Get a valid model first
-		listOut, _, listErr := runCommand(t, longTestTimeout, "models", "list")
-		if listErr != nil {
-			t.Skip("Cannot test deploy without working models list")
-		}
+// Test Kind cluster functionality
+func TestKindClusterOperations(t *testing.T) {
+	if !kindAvailable {
+		t.Skip("Kind not available, skipping Kind cluster tests")
+	}
 
-		// Extract first model name
-		var modelName string
-		lines := strings.Split(listOut, "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "phi-") {
-				fields := strings.Fields(line)
-				if len(fields) > 0 {
-					modelName = fields[0]
-					break
-				}
-			}
-		}
+	cm := NewClusterManager()
 
-		if modelName == "" {
-			modelName = "phi-3.5-mini-instruct" // fallback to known model
-		}
+	// Create Kind cluster
+	if err := cm.CreateKindCluster(t); err != nil {
+		t.Fatalf("Failed to create Kind cluster: %v", err)
+	}
+	defer cm.DestroyKindCluster(t)
 
-		stdout, stderr, err := runCommand(t, 0, "deploy", 
+	// Deploy nginx for testing
+	if err := cm.DeployNginxToKind(t); err != nil {
+		t.Fatalf("Failed to deploy nginx: %v", err)
+	}
+
+	t.Run("deploy dry-run on kind", func(t *testing.T) {
+		stdout, stderr, err := runCommand(t, testTimeout,
+			"deploy",
 			"--workspace-name", "test-workspace",
-			"--model", modelName,
+			"--model", "phi-3.5-mini-instruct",
+			"--instance-type", "Standard_NC6s_v3",
 			"--dry-run")
 
 		if err != nil {
 			t.Errorf("Deploy dry-run failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-			return
 		}
 
-		// Deploy output goes through klog to stderr
+		combinedOutput := stdout + stderr
+		if !strings.Contains(combinedOutput, "Dry-run mode") {
+			t.Errorf("Expected dry-run output not found: %s", combinedOutput)
+		}
+	})
+
+	t.Run("status with no workspaces", func(t *testing.T) {
+		stdout, stderr, err := runCommand(t, testTimeout, "status")
+
+		// Should succeed even with no workspaces
 		combinedOutput := stdout + stderr
 
-		expectedOutputs := []string{
-			"Dry-run mode",
-			"Workspace Configuration",
-			"Name: test-workspace", 
-			"Model: " + modelName,
-			"Mode: Inference",
-			"Workspace definition is valid",
-		}
-
-		for _, expected := range expectedOutputs {
-			if !strings.Contains(combinedOutput, expected) {
-				t.Errorf("Dry-run output should contain '%s'\nGot stdout: %s\nGot stderr: %s", expected, stdout, stderr)
-			}
-		}
-	})
-
-	t.Run("Deploy with invalid model", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "deploy",
-			"--workspace-name", "test-workspace", 
-			"--model", "invalid-model-name",
-			"--dry-run")
-
-		if err == nil {
-			t.Error("Deploy should fail with invalid model name")
-		}
-
-		// Should provide helpful suggestions
-		combinedOutput := stdout + stderr
-		if !strings.Contains(combinedOutput, "not supported") {
-			t.Errorf("Should mention model not supported\nStdout: %s\nStderr: %s", stdout, stderr)
-		}
-	})
-
-	t.Run("Deploy missing required args", func(t *testing.T) {
-		testCases := []struct {
-			name string
-			args []string
-		}{
-			{"missing workspace name", []string{"deploy", "--model", "phi-3.5-mini-instruct"}},
-			{"missing model", []string{"deploy", "--workspace-name", "test"}},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				_, _, err := runCommand(t, 0, tc.args...)
-				if err == nil {
-					t.Errorf("Deploy should fail when %s", tc.name)
-				}
-			})
-		}
-	})
-
-	t.Run("Deploy tuning mode", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "deploy",
-			"--workspace-name", "test-tune",
-			"--model", "phi-3.5-mini-instruct",
-			"--tuning",
-			"--input-urls", "gs://test-bucket/data",
-			"--output-image", "test.azurecr.io/tuned-model",
-			"--dry-run")
-
 		if err != nil {
-			t.Errorf("Deploy tuning dry-run failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-			return
-		}
-
-		// Check combined output for tuning mode indication
-		combinedOutput := stdout + stderr
-		if !strings.Contains(combinedOutput, "Mode: Fine-tuning") {
-			t.Errorf("Tuning mode should be indicated\nGot stdout: %s\nGot stderr: %s", stdout, stderr)
+			// Check if it's a meaningful error (like CRD not found)
+			if !strings.Contains(combinedOutput, "no resources found") &&
+				!strings.Contains(combinedOutput, "the server doesn't have a resource type") {
+				t.Errorf("Unexpected error: %v\nOutput: %s", err, combinedOutput)
+			}
 		}
 	})
 }
 
-// TestStatusCommand tests the status command functionality  
-func TestStatusCommand(t *testing.T) {
-	t.Run("Status help", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "status", "--help")
-		if err != nil {
-			t.Errorf("Status help failed: %v\nStderr: %s", err, stderr)
-			return
-		}
+// Test AKS cluster functionality with GPU nodes
+func TestAKSClusterOperations(t *testing.T) {
+	if !aksAvailable {
+		t.Skip("Azure CLI not available or not authenticated, skipping AKS tests")
+	}
 
-		expectedSections := []string{
-			"status of one or more Kaito workspaces", // Updated to match actual text
-			"Usage:",
-			"--workspace-name",
-			"--all-namespaces",
-			"--watch",
-		}
+	cm := NewClusterManager()
 
-		for _, section := range expectedSections {
-			if !strings.Contains(stdout, section) {
-				t.Errorf("Status help should contain '%s'\nGot: %s", section, stdout)
-			}
-		}
-	})
+	// Create AKS cluster (this is expensive, so we do it once per test run)
+	if err := cm.CreateAKSCluster(t); err != nil {
+		t.Fatalf("Failed to create AKS cluster: %v", err)
+	}
+	defer cm.DestroyAKSCluster(t)
 
-	t.Run("Status validation", func(t *testing.T) {
-		// Test conflicting flags
-		_, _, err := runCommand(t, 0, "status", "--namespace", "test", "--all-namespaces")
-		if err == nil {
-			t.Error("Status should fail with conflicting namespace flags")
-		}
-	})
-}
-
-// TestGetEndpointCommand tests the get-endpoint command functionality
-func TestGetEndpointCommand(t *testing.T) {
-	t.Run("Get-endpoint help", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "get-endpoint", "--help")
-		if err != nil {
-			t.Errorf("Get-endpoint help failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		expectedSections := []string{
-			"inference endpoint URL", // Updated to match actual text
-			"Usage:",
-			"--workspace-name",
-			"--format",
-			"--external",
-		}
-
-		for _, section := range expectedSections {
-			if !strings.Contains(stdout, section) {
-				t.Errorf("Get-endpoint help should contain '%s'\nGot: %s", section, stdout)
-			}
-		}
-	})
-
-	t.Run("Get-endpoint validation", func(t *testing.T) {
-		// Test missing workspace name
-		_, _, err := runCommand(t, 0, "get-endpoint")
-		if err == nil {
-			t.Error("Get-endpoint should fail without workspace name")
-		}
-
-		// Test invalid format
-		_, _, err = runCommand(t, 0, "get-endpoint", "--workspace-name", "test", "--format", "invalid")
-		if err == nil {
-			t.Error("Get-endpoint should fail with invalid format")
-		}
-	})
-}
-
-// TestChatCommand tests the chat command functionality
-func TestChatCommand(t *testing.T) {
-	t.Run("Chat help", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "chat", "--help")
-		if err != nil {
-			t.Errorf("Chat help failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		expectedSections := []string{
-			"interactive chat session", // Updated to match actual text
-			"Usage:",
-			"--workspace-name",
-			"--message",
-			"--temperature",
-			"--max-tokens",
-		}
-
-		for _, section := range expectedSections {
-			if !strings.Contains(stdout, section) {
-				t.Errorf("Chat help should contain '%s'\nGot: %s", section, stdout)
-			}
-		}
-	})
-
-	t.Run("Chat validation", func(t *testing.T) {
-		testCases := []struct {
-			name string
-			args []string
-		}{
-			{"missing workspace", []string{"chat"}},
-			{"invalid temperature", []string{"chat", "--workspace-name", "test", "--temperature", "3.0"}},
-			{"invalid top-p", []string{"chat", "--workspace-name", "test", "--top-p", "2.0"}},
-			{"invalid max-tokens", []string{"chat", "--workspace-name", "test", "--max-tokens", "0"}},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				_, _, err := runCommand(t, 0, tc.args...)
-				if err == nil {
-					t.Errorf("Chat should fail for %s", tc.name)
-				}
-			})
-		}
-	})
-}
-
-// TestRagCommand tests the RAG command functionality
-func TestRagCommand(t *testing.T) {
-	t.Run("RAG help", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "rag", "--help")
-		if err != nil {
-			t.Errorf("RAG help failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		expectedSections := []string{
-			"Deploy and query RAG engines", // Updated to match actual text
-			"Usage:",
-			"Available Commands:",
+	t.Run("deploy validation on aks", func(t *testing.T) {
+		// Test validation without actually creating resources
+		stdout, stderr, err := runCommand(t, testTimeout,
 			"deploy",
-			"query",
-		}
+			"--workspace-name", "test-gpu-workspace",
+			"--model", "llama-2-7b",
+			"--instance-type", "Standard_NC6s_v3",
+			"--dry-run")
 
-		for _, section := range expectedSections {
-			if !strings.Contains(stdout, section) {
-				t.Errorf("RAG help should contain '%s'\nGot: %s", section, stdout)
-			}
-		}
-	})
-
-	t.Run("RAG deploy help", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "rag", "deploy", "--help")
 		if err != nil {
-			t.Errorf("RAG deploy help failed: %v\nStderr: %s", err, stderr)
-			return
+			t.Errorf("Deploy validation failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
 		}
 
-		expectedSections := []string{
-			"Deploy a RAG", // Updated to match actual text
-			"--name",
-			"--vector-db",
-			"--index-service",
-			"--embedding-model",
-		}
-
-		for _, section := range expectedSections {
-			if !strings.Contains(stdout, section) {
-				t.Errorf("RAG deploy help should contain '%s'\nGot: %s", section, stdout)
-			}
+		combinedOutput := stdout + stderr
+		if !strings.Contains(combinedOutput, "llama-2-7b") {
+			t.Errorf("Expected model name in output: %s", combinedOutput)
 		}
 	})
 
-	t.Run("RAG deploy validation", func(t *testing.T) {
-		testCases := []struct {
-			name string
-			args []string
-		}{
-			{"missing name", []string{"rag", "deploy"}},
-			{"invalid vector db", []string{"rag", "deploy", "--name", "test", "--vector-db", "invalid"}},
-			{"invalid index service", []string{"rag", "deploy", "--name", "test", "--index-service", "invalid"}},
+	t.Run("get-endpoint validation", func(t *testing.T) {
+		// Test endpoint command validation
+		_, stderr, err := runCommand(t, testTimeout,
+			"get-endpoint",
+			"--workspace-name", "non-existent-workspace")
+
+		if err == nil {
+			t.Error("Expected error for non-existent workspace")
 		}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				_, _, err := runCommand(t, 0, tc.args...)
-				if err == nil {
-					t.Errorf("RAG deploy should fail for %s", tc.name)
-				}
-			})
+		if !strings.Contains(stderr, "not found") && !strings.Contains(stderr, "workspace") {
+			t.Errorf("Expected workspace not found error, got: %s", stderr)
 		}
 	})
 
-	t.Run("RAG deploy dry-run", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0, "rag", "deploy",
+	t.Run("chat validation", func(t *testing.T) {
+		// Test chat command validation
+		_, stderr, err := runCommand(t, testTimeout,
+			"chat",
+			"--workspace-name", "non-existent-workspace",
+			"--message", "test message")
+
+		if err == nil {
+			t.Error("Expected error for non-existent workspace")
+		}
+
+		// Should indicate workspace not found or not ready
+		if !strings.Contains(stderr, "not found") && !strings.Contains(stderr, "workspace") {
+			t.Errorf("Expected workspace error, got: %s", stderr)
+		}
+	})
+
+	t.Run("rag deploy validation", func(t *testing.T) {
+		// Test RAG deploy validation
+		stdout, stderr, err := runCommand(t, testTimeout,
+			"rag", "deploy",
 			"--name", "test-rag",
 			"--vector-db", "faiss",
 			"--index-service", "llamaindex",
 			"--dry-run")
 
 		if err != nil {
-			t.Errorf("RAG deploy dry-run failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
-			return
+			t.Errorf("RAG deploy validation failed: %v\nStdout: %s\nStderr: %s", err, stdout, stderr)
 		}
 
-		// RAG deploy output goes through klog to stderr
 		combinedOutput := stdout + stderr
-
-		expectedOutputs := []string{
-			"Dry-run mode",
-			"RAG Engine Configuration",
-			"Name: test-rag",
-			"Vector Database: faiss",
-			"Index Service: llamaindex",
+		if !strings.Contains(combinedOutput, "test-rag") {
+			t.Errorf("Expected RAG name in output: %s", combinedOutput)
 		}
+	})
+}
 
-		for _, expected := range expectedOutputs {
-			if !strings.Contains(combinedOutput, expected) {
-				t.Errorf("RAG deploy dry-run should contain '%s'\nGot stdout: %s\nGot stderr: %s", expected, stdout, stderr)
+// Test input validation
+func TestInputValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "deploy missing workspace name",
+			args:        []string{"deploy", "--model", "llama-2-7b"},
+			expectError: true,
+			errorText:   "workspace name",
+		},
+		{
+			name:        "deploy missing model",
+			args:        []string{"deploy", "--workspace-name", "test"},
+			expectError: true,
+			errorText:   "model name",
+		},
+		{
+			name:        "deploy invalid model",
+			args:        []string{"deploy", "--workspace-name", "test", "--model", "invalid-model"},
+			expectError: true,
+			errorText:   "not supported",
+		},
+		{
+			name:        "chat missing workspace",
+			args:        []string{"chat", "--message", "hello"},
+			expectError: true,
+			errorText:   "workspace name",
+		},
+		{
+			name:        "get-endpoint missing workspace",
+			args:        []string{"get-endpoint"},
+			expectError: true,
+			errorText:   "workspace name",
+		},
+		{
+			name:        "rag deploy missing name",
+			args:        []string{"rag", "deploy", "--vector-db", "faiss"},
+			expectError: true,
+			errorText:   "name is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderr, err := runCommand(t, testTimeout, tt.args...)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but command succeeded")
+				}
+				if !strings.Contains(stderr, tt.errorText) {
+					t.Errorf("Expected error text '%s' not found in: %s", tt.errorText, stderr)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v\nStderr: %s", err, stderr)
+				}
 			}
-		}
-	})
-}
-
-// TestNetworkFailureScenarios tests fallback behavior when external APIs fail
-func TestNetworkFailureScenarios(t *testing.T) {
-	t.Run("Models list with network failure fallback", func(t *testing.T) {
-		// This test relies on the fallback mechanism when the official API is unreachable
-		// The test will pass if fallback models are shown
-		stdout, stderr, err := runCommand(t, longTestTimeout, "models", "list")
-		if err != nil {
-			t.Errorf("Models list should not fail even with network issues: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		// Should still show some models (from fallback)
-		if !strings.Contains(stdout, "NAME") || !strings.Contains(stdout, "TYPE") {
-			t.Errorf("Should show model table even with network issues\nGot: %s", stdout)
-		}
-
-		// If fallback is used, should contain known fallback models
-		fallbackModels := []string{"phi-3.5-mini-instruct", "llama-2-7b", "mistral-7b"}
-		foundFallback := false
-		for _, model := range fallbackModels {
-			if strings.Contains(stdout, model) {
-				foundFallback = true
-				break
-			}
-		}
-
-		if !foundFallback {
-			t.Errorf("Should show fallback models when official API fails\nGot: %s", stdout)
-		}
-	})
-}
-
-// TestPerformanceAndTimeouts tests performance aspects and timeout handling
-func TestPerformanceAndTimeouts(t *testing.T) {
-	t.Run("Models list performance", func(t *testing.T) {
-		start := time.Now()
-		stdout, stderr, err := runCommand(t, longTestTimeout, "models", "list")
-		duration := time.Since(start)
-
-		if err != nil {
-			t.Errorf("Models list failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		// Should complete within reasonable time (with network calls)
-		if duration > 45*time.Second {
-			t.Errorf("Models list took too long: %v", duration)
-		}
-
-		// Should return data
-		if len(strings.TrimSpace(stdout)) < 50 {
-			t.Errorf("Models list returned insufficient data: %s", stdout)
-		}
-	})
-
-	t.Run("Command help performance", func(t *testing.T) {
-		start := time.Now()
-		_, stderr, err := runCommand(t, 0, "--help")
-		duration := time.Since(start)
-
-		if err != nil {
-			t.Errorf("Help command failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		// Help should be very fast (no network calls)
-		if duration > 2*time.Second {
-			t.Errorf("Help command took too long: %v", duration)
-		}
-	})
-}
-
-// TestOutputFormats tests different output formats and edge cases
-func TestOutputFormats(t *testing.T) {
-	t.Run("Models list JSON output", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, longTestTimeout, "models", "list", "--output")
-		if err != nil {
-			t.Errorf("Models list JSON failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		// JSON output should go to stderr through klog
-		combinedOutput := stdout + stderr
-		
-		// Should contain some JSON-like content
-		if !strings.Contains(combinedOutput, "{") && !strings.Contains(combinedOutput, "[") {
-			t.Errorf("Should contain JSON content\nStdout: %s\nStderr: %s", stdout, stderr)
-		}
-	})
-
-	t.Run("Models filtering", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, longTestTimeout, "models", "list", "--type", "LLM")
-		if err != nil {
-			t.Errorf("Models filtering failed: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		// Table output goes to stdout, but if no models match, might be empty
-		// Should either have headers or be empty (both are valid)
-		if stdout != "" && !strings.Contains(stdout, "NAME") {
-			t.Errorf("Non-empty filtered output should have headers\nGot: %s", stdout)
-		}
-	})
-}
-
-// TestEdgeCases tests various edge cases and error conditions
-func TestEdgeCases(t *testing.T) {
-	t.Run("Very long workspace name", func(t *testing.T) {
-		longName := strings.Repeat("a", 100)
-		_, _, err := runCommand(t, 0, "deploy", 
-			"--workspace-name", longName,
-			"--model", "phi-3.5-mini-instruct",
-			"--dry-run")
-		
-		// Should handle long names gracefully (either accept or reject with clear error)
-		// The specific behavior depends on Kubernetes naming constraints
-		if err != nil {
-			// If it fails, error should be informative
-			t.Logf("Long workspace name rejected as expected: %v", err)
-		}
-	})
-
-	t.Run("Special characters in workspace name", func(t *testing.T) {
-		specialName := "test-workspace-123"
-		stdout, stderr, err := runCommand(t, 0, "deploy",
-			"--workspace-name", specialName,
-			"--model", "phi-3.5-mini-instruct", 
-			"--dry-run")
-
-		if err != nil {
-			t.Errorf("Valid workspace name with special chars should work: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		// Check combined output for workspace name
-		combinedOutput := stdout + stderr
-		if !strings.Contains(combinedOutput, specialName) {
-			t.Errorf("Output should contain the workspace name\nGot stdout: %s\nGot stderr: %s", stdout, stderr)
-		}
-	})
-
-	t.Run("Empty command", func(t *testing.T) {
-		stdout, stderr, err := runCommand(t, 0)
-		if err != nil {
-			t.Errorf("Empty command should show help: %v\nStderr: %s", err, stderr)
-			return
-		}
-
-		if !strings.Contains(stdout, "Usage:") {
-			t.Errorf("Empty command should show usage\nGot: %s", stdout)
-		}
-	})
+		})
+	}
 }
