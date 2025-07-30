@@ -1,0 +1,487 @@
+package cmd
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
+)
+
+// ChatOptions holds the options for the chat command
+type ChatOptions struct {
+	configFlags *genericclioptions.ConfigFlags
+
+	WorkspaceName string
+	Namespace     string
+	SystemPrompt  string
+	Temperature   float64
+	MaxTokens     int
+	TopP          float64
+	Message       string
+	Stream        bool
+	Echo          bool
+}
+
+// NewChatCmd creates the chat command
+func NewChatCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
+	o := &ChatOptions{
+		configFlags: configFlags,
+		Temperature: 0.7,
+		MaxTokens:   1024,
+		TopP:        0.9,
+		Stream:      false,
+		Echo:        false,
+	}
+
+	cmd := &cobra.Command{
+		Use:   "chat",
+		Short: "Interactive chat with deployed AI models",
+		Long: `Start an interactive chat session with a deployed Kaito workspace model.
+
+This command provides a chat interface to interact with deployed models using
+OpenAI-compatible APIs. Supports both interactive and single-message modes.`,
+		Example: `  # Start interactive chat session
+  kubectl kaito chat --workspace-name my-llama
+
+  # Send a single message
+  kubectl kaito chat --workspace-name my-llama --message "What is AI?"
+
+  # Configure inference parameters
+  kubectl kaito chat --workspace-name my-llama --temperature 0.5 --max-tokens 512
+
+  # Use system prompt for context
+  kubectl kaito chat --workspace-name my-llama --system-prompt "You are a helpful coding assistant"`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := o.validate(); err != nil {
+				klog.Errorf("Validation failed: %v", err)
+				return fmt.Errorf("validation failed: %w", err)
+			}
+			return o.run()
+		},
+	}
+
+	cmd.Flags().StringVar(&o.WorkspaceName, "workspace-name", "", "Name of the workspace (required)")
+	cmd.Flags().StringVarP(&o.Namespace, "namespace", "n", "", "Kubernetes namespace")
+	cmd.Flags().StringVar(&o.SystemPrompt, "system-prompt", "", "System prompt for the conversation")
+	cmd.Flags().Float64Var(&o.Temperature, "temperature", 0.7, "Temperature for response generation (0.0-2.0)")
+	cmd.Flags().IntVar(&o.MaxTokens, "max-tokens", 1024, "Maximum tokens in response")
+	cmd.Flags().Float64Var(&o.TopP, "top-p", 0.9, "Top-p (nucleus sampling) parameter (0.0-1.0)")
+	cmd.Flags().StringVarP(&o.Message, "message", "m", "", "Single message to send (non-interactive mode)")
+	cmd.Flags().BoolVar(&o.Stream, "stream", false, "Enable streaming responses")
+	cmd.Flags().BoolVar(&o.Echo, "echo", false, "Echo the input in the response")
+
+	if err := cmd.MarkFlagRequired("workspace-name"); err != nil {
+		klog.Errorf("Failed to mark workspace-name flag as required: %v", err)
+	}
+
+	return cmd
+}
+
+func (o *ChatOptions) validate() error {
+	klog.V(4).Info("Validating chat options")
+
+	if o.WorkspaceName == "" {
+		return fmt.Errorf("workspace name is required")
+	}
+	if o.Temperature < 0.0 || o.Temperature > 2.0 {
+		return fmt.Errorf("temperature must be between 0.0 and 2.0")
+	}
+	if o.TopP < 0.0 || o.TopP > 1.0 {
+		return fmt.Errorf("top-p must be between 0.0 and 1.0")
+	}
+	if o.MaxTokens <= 0 {
+		return fmt.Errorf("max-tokens must be greater than 0")
+	}
+
+	klog.V(4).Info("Chat validation completed successfully")
+	return nil
+}
+
+func (o *ChatOptions) run() error {
+	klog.V(2).Infof("Starting chat with workspace: %s", o.WorkspaceName)
+
+	// Get namespace
+	if o.Namespace == "" {
+		if ns, _, err := o.configFlags.ToRawKubeConfigLoader().Namespace(); err == nil && ns != "" {
+			o.Namespace = ns
+		} else {
+			klog.V(4).Info("No namespace specified, using 'default'")
+			o.Namespace = "default"
+		}
+	}
+
+	// Get REST config
+	config, err := o.configFlags.ToRESTConfig()
+	if err != nil {
+		klog.Errorf("Failed to get REST config: %v", err)
+		return fmt.Errorf("failed to get REST config: %w", err)
+	}
+
+	// Create clients
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		klog.Errorf("Failed to create kubernetes client: %v", err)
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+
+	// Get the endpoint URL
+	endpoint, err := o.getInferenceEndpoint(context.TODO(), clientset)
+	if err != nil {
+		klog.Errorf("Failed to get inference endpoint: %v", err)
+		return err
+	}
+
+	klog.V(3).Infof("Using endpoint: %s", endpoint)
+
+	// Get model name for display
+	modelName, err := o.getModelName(config)
+	if err != nil {
+		klog.Warningf("Could not get model name: %v", err)
+		modelName = "Unknown"
+	}
+
+	// Handle single message mode
+	if o.Message != "" {
+		klog.V(3).Info("Sending single message")
+		response, err := o.sendMessage(endpoint, o.Message)
+		if err != nil {
+			klog.Errorf("Failed to send message: %v", err)
+			return err
+		}
+		klog.Info(response)
+		return nil
+	}
+
+	// Start interactive session
+	return o.startInteractiveSession(endpoint, modelName)
+}
+
+func (o *ChatOptions) getInferenceEndpoint(ctx context.Context, clientset kubernetes.Interface) (string, error) {
+	klog.V(3).Info("Getting inference endpoint")
+
+	// Get the service for the workspace (service name equals workspace name)
+	svc, err := clientset.CoreV1().Services(o.Namespace).Get(ctx, o.WorkspaceName, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("Failed to get service for workspace %s: %v", o.WorkspaceName, err)
+		return "", fmt.Errorf("failed to get service for workspace %s: %v", o.WorkspaceName, err)
+	}
+
+	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == "None" {
+		return "", fmt.Errorf("service %s has no cluster IP", o.WorkspaceName)
+	}
+
+	// Return OpenAI-compatible chat endpoint
+	endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/v1/chat/completions", o.WorkspaceName, o.Namespace)
+	klog.V(3).Infof("Endpoint: %s", endpoint)
+	return endpoint, nil
+}
+
+func (o *ChatOptions) getModelName(config interface{}) (string, error) {
+	klog.V(4).Info("Getting model name from workspace")
+
+	// Get REST config
+	restConfig, err := o.configFlags.ToRESTConfig()
+	if err != nil {
+		klog.Errorf("Failed to get REST config: %v", err)
+		return "", fmt.Errorf("failed to get REST config: %w", err)
+	}
+
+	// Create dynamic client
+	dynamicClient, err := dynamic.NewForConfig(restConfig)
+	if err != nil {
+		klog.Errorf("Failed to create dynamic client: %v", err)
+		return "", fmt.Errorf("failed to create dynamic client: %w", err)
+	}
+
+	gvr := schema.GroupVersionResource{
+		Group:    "kaito.sh",
+		Version:  "v1beta1",
+		Resource: "workspaces",
+	}
+
+	workspace, err := dynamicClient.Resource(gvr).Namespace(o.Namespace).Get(
+		context.TODO(),
+		o.WorkspaceName,
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		klog.Errorf("Failed to get workspace %s: %v", o.WorkspaceName, err)
+		return "", fmt.Errorf("failed to get workspace %s: %w", o.WorkspaceName, err)
+	}
+
+	// Try to get model name from spec
+	if spec, found := workspace.Object["spec"]; found {
+		if specMap, ok := spec.(map[string]interface{}); ok {
+			if inference, found := specMap["inference"]; found {
+				if inferenceMap, ok := inference.(map[string]interface{}); ok {
+					if preset, found := inferenceMap["preset"]; found {
+						if presetMap, ok := preset.(map[string]interface{}); ok {
+							if name, found := presetMap["name"]; found {
+								if nameStr, ok := name.(string); ok {
+									return nameStr, nil
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "Unknown", nil
+}
+
+func (o *ChatOptions) startInteractiveSession(endpoint, modelName string) error {
+	klog.V(2).Info("Starting interactive chat session")
+
+	klog.Infof("Connected to workspace: %s (model: %s)", o.WorkspaceName, modelName)
+	klog.Info("Type /help for commands or /quit to exit.")
+	klog.Info("")
+
+	scanner := bufio.NewScanner(os.Stdin)
+
+	for {
+		klog.Info(">>> ")
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				klog.Info("\nChat session ended.")
+				return nil
+			}
+			klog.Errorf("Error reading input: %v", scanner.Err())
+			return fmt.Errorf("error reading input: %w", scanner.Err())
+		}
+
+		input := strings.TrimSpace(scanner.Text())
+
+		// Handle commands
+		if strings.HasPrefix(input, "/") {
+			if o.handleCommand(input, modelName) {
+				return nil // Exit command
+			}
+			continue
+		}
+
+		// Skip empty input
+		if input == "" {
+			continue
+		}
+
+		// Send message and get response
+		response, err := o.sendMessage(endpoint, input)
+		if err != nil {
+			klog.Errorf("Error: %v", err)
+			continue
+		}
+
+		klog.Info(response)
+		klog.Info("")
+	}
+}
+
+func (o *ChatOptions) handleCommand(command, modelName string) bool {
+	klog.V(4).Infof("Handling command: %s", command)
+
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return false
+	}
+
+	switch parts[0] {
+	case "/help":
+		klog.Info("Available commands:")
+		klog.Info("  /help        - Show this help message")
+		klog.Info("  /quit        - Exit the chat session")
+		klog.Info("  /clear       - Clear the conversation history")
+		klog.Info("  /model       - Show current model information")
+		klog.Info("  /params      - Show current inference parameters")
+		klog.Info("  /set <param> <value> - Set inference parameter (temperature, max_tokens, etc.)")
+		klog.Info("")
+
+	case "/quit", "/exit":
+		klog.Info("Chat session ended.")
+		return true
+
+	case "/clear":
+		klog.Info("\033[2J\033[H") // Clear screen
+		klog.Infof("Connected to workspace: %s (model: %s)", o.WorkspaceName, modelName)
+		klog.Info("Type /help for commands or /quit to exit.")
+		klog.Info("")
+
+	case "/model":
+		klog.Infof("Current model: %s", modelName)
+		klog.Infof("Workspace: %s", o.WorkspaceName)
+		klog.Infof("Namespace: %s", o.Namespace)
+		klog.Info("")
+
+	case "/params":
+		klog.Info("Current inference parameters:")
+		klog.Infof("  Temperature: %.1f", o.Temperature)
+		klog.Infof("  Max tokens: %d", o.MaxTokens)
+		klog.Infof("  Top-p: %.1f", o.TopP)
+		klog.Infof("  Stream: %t", o.Stream)
+		klog.Infof("  Echo: %t", o.Echo)
+		klog.Info("")
+
+	case "/set":
+		if len(parts) < 3 {
+			klog.Info("Usage: /set <parameter> <value>")
+			klog.Info("Available parameters: temperature, max_tokens, top_p, stream, echo")
+			klog.Info("")
+			return false
+		}
+		o.setParameter(parts[1], parts[2])
+
+	default:
+		klog.Infof("Unknown command: %s", parts[0])
+		klog.Info("Type /help for available commands.")
+		klog.Info("")
+	}
+
+	return false
+}
+
+func (o *ChatOptions) setParameter(param, value string) {
+	klog.V(4).Infof("Setting parameter %s to %s", param, value)
+
+	switch param {
+	case "temperature":
+		if temp, err := strconv.ParseFloat(value, 64); err == nil && temp >= 0.0 && temp <= 2.0 {
+			o.Temperature = temp
+			klog.Infof("Temperature set to %.1f", temp)
+		} else {
+			klog.Info("Invalid temperature value. Must be between 0.0 and 2.0")
+		}
+
+	case "max_tokens":
+		if tokens, err := strconv.Atoi(value); err == nil && tokens > 0 {
+			o.MaxTokens = tokens
+			klog.Infof("Max tokens set to %d", tokens)
+		} else {
+			klog.Info("Invalid max_tokens value. Must be a positive integer")
+		}
+
+	case "top_p":
+		if topP, err := strconv.ParseFloat(value, 64); err == nil && topP >= 0.0 && topP <= 1.0 {
+			o.TopP = topP
+			klog.Infof("Top-p set to %.1f", topP)
+		} else {
+			klog.Info("Invalid top_p value. Must be between 0.0 and 1.0")
+		}
+
+	case "stream":
+		if stream, err := strconv.ParseBool(value); err == nil {
+			o.Stream = stream
+			klog.Infof("Stream set to %t", stream)
+		} else {
+			klog.Info("Invalid stream value. Must be true or false")
+		}
+
+	case "echo":
+		if echo, err := strconv.ParseBool(value); err == nil {
+			o.Echo = echo
+			klog.Infof("Echo set to %t", echo)
+		} else {
+			klog.Info("Invalid echo value. Must be true or false")
+		}
+
+	default:
+		klog.Infof("Unknown parameter: %s", param)
+		klog.Info("Available parameters: temperature, max_tokens, top_p, stream, echo")
+	}
+	klog.Info("")
+}
+
+func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {
+	klog.V(4).Infof("Sending message to endpoint: %s", endpoint)
+
+	// Prepare request payload
+	payload := map[string]interface{}{
+		"messages": []map[string]string{
+			{
+				"role":    "user",
+				"content": message,
+			},
+		},
+		"temperature": o.Temperature,
+		"max_tokens":  o.MaxTokens,
+		"top_p":       o.TopP,
+		"stream":      o.Stream,
+		"echo":        o.Echo,
+	}
+
+	// Add system prompt if provided
+	if o.SystemPrompt != "" {
+		messages := payload["messages"].([]map[string]string)
+		systemMessage := map[string]string{
+			"role":    "system",
+			"content": o.SystemPrompt,
+		}
+		payload["messages"] = append([]map[string]string{systemMessage}, messages...)
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		klog.Errorf("Failed to marshal request: %v", err)
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Make HTTP request
+	url := endpoint
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		klog.Errorf("Failed to send request: %v", err)
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err == nil && resp.StatusCode != http.StatusOK {
+		klog.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	if err != nil {
+		klog.Errorf("Failed to read response: %v", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse response
+	var response map[string]interface{}
+	if err := json.Unmarshal(body, &response); err != nil {
+		klog.Errorf("Failed to parse response: %v", err)
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Extract message content
+	if choices, ok := response["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			if message, ok := choice["message"].(map[string]interface{}); ok {
+				if content, ok := message["content"].(string); ok {
+					return strings.TrimSpace(content), nil
+				}
+			}
+		}
+	}
+
+	klog.Error("Unexpected response format")
+	return "", fmt.Errorf("unexpected response format")
+}
+
+

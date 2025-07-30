@@ -1,388 +1,356 @@
-# kubectl-kaito
+# Kaito Kubectl CLI Plugin
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/kaito-project/kubectl-kaito)](https://golang.org/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/kaito-project/kubectl-kaito)](https://github.com/kaito-project/kubectl-kaito/releases)
-[![CodeQL](https://github.com/kaito-project/kubectl-kaito/actions/workflows/codeql.yml/badge.svg)](https://github.com/kaito-project/kubectl-kaito/actions/workflows/codeql.yml)
+## Summary
 
-A powerful kubectl plugin for deploying and managing AI/ML models in Kubernetes using the [Kaito AI Toolchain Operator](https://github.com/kaito-project/kaito).
+Kaito CLI provides a user-friendly kubectl extension for deploying and managing KAITO workspaces on Kubernetes. Kaito kubectl plugin aims to reduce friction for data scientists and ML engineers by abstracting away error-prone YAML authoring and enabling streamlined model deployment workflows. The initial focus is on core deployment and inference scenarios, with potential expansion to a standalone CLI if advanced features beyond kubectl's scope are needed.
 
-## 🚀 What is kubectl-kaito?
+## Motivation
 
-kubectl-kaito simplifies AI model deployment on Kubernetes by providing:
+Currently, users interact with KAITO by manually crafting Kubernetes YAML manifests. This process is error-prone, unfriendly to non-Kubernetes experts, and slows down experimentation and deployment. As KAITO adoption grows, there is a need for a more accessible, robust, and automation-friendly interface that:
 
-- **🤖 One-command model deployment** - Deploy popular LLMs like Llama, Falcon, and Phi with a single command
-- **⚡ Automatic GPU provisioning** - Intelligent GPU node scaling and resource management
-- **🔧 Model fine-tuning** - Easy fine-tuning with QLora/LoRA using your custom datasets
-- **📊 Real-time monitoring** - Workspace status tracking and log streaming
-- **🎯 Zero configuration** - Works with existing kubectl setup and cluster contexts
+- Reduces the learning curve for new users
+- Minimizes configuration errors
+- Accelerates model deployment and iteration
+- Supports both single-cluster and multi-cluster workflows
+- Integrates with CI/CD pipelines and platform automation
 
-## 📋 Prerequisites
+### Goals
 
-| Requirement            | Version | Installation                                                             |
-| ---------------------- | ------- | ------------------------------------------------------------------------ |
-| **kubectl**            | v1.20+  | [Install Guide](https://kubernetes.io/docs/tasks/tools/install-kubectl/) |
-| **Kaito Operator**     | Latest  | [Install Guide](https://github.com/kaito-project/kaito#installation)     |
-| **Kubernetes Cluster** | v1.24+  | With GPU support (Azure/AWS/GCP)                                         |
+- Provide a user-friendly kubectl plugin for deploying and managing KAITO workspaces
+- Enable rapid model deployment with minimal YAML configuration
+- Support core inference scenarios and workspace management
+- Integrate seamlessly with existing Kubernetes authentication and RBAC
+- Facilitate both interactive use and CI/CD automation
 
-**Quick verification:**
-```bash
-kubectl version --client
-kubectl get nodes  # Should show GPU-capable nodes
-```
+### Non-Goals/Future Work
 
-## 📦 Installation
+- Replacing or deprecating existing YAML workflows
+- Implementing a web-based GUI (focus is CLI/terminal UX)
+- Changing the underlying KAITO resource model or API
 
-### Via Krew (Recommended)
+## Solution Design
 
-```bash
-# Install the plugin
-kubectl krew install kaito
+### Kubectl Plugin
 
-# Verify installation
-kubectl kaito version
-```
+A new kubectl plugin distributed through [Krew](https://github.com/kubernetes-sigs/krew) for Kaito that provides seamless integration with existing Kubernetes workflows.
 
-### Manual Installation
+Designed for engineers already comfortable with native Kubernetes tooling. By distributing the plugin through [Krew](https://github.com/kubernetes-sigs/krew), users avoid installing a separate binary, inherit their existing kube-contexts and RBAC, and benefit from familiar `kubectl` verb–noun syntax.
 
-**Linux/macOS:**
-```bash
-# Download latest release
-KAITO_VERSION=$(curl -s https://api.github.com/repos/kaito-project/kubectl-kaito/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-curl -LO "https://github.com/kaito-project/kubectl-kaito/releases/download/${KAITO_VERSION}/kubectl-kaito-${KAITO_VERSION}-linux-amd64.tar.gz"
+## Core Features and Commands
 
-# Install
-tar -xzf kubectl-kaito-${KAITO_VERSION}-linux-amd64.tar.gz
-sudo mv kubectl-kaito /usr/local/bin/
-chmod +x /usr/local/bin/kubectl-kaito
-```
+### Deploy Command
 
-**Build from source:**
-```bash
-git clone https://github.com/kaito-project/kubectl-kaito.git
-cd kubectl-kaito
-make build
-sudo cp bin/kubectl-kaito /usr/local/bin/
-```
+The **deploy** command is the primary entry point for KAITO workspace management, covering both inference and tuning scenarios.
 
-## 🚀 Quick Start
-
-### Install the Plugin
+#### Inference Deployment
 
 ```bash
-# Via krew (kubectl plugin manager)
-kubectl krew install kaito
+# Basic inference deployment with preset model
+kubectl kaito deploy --workspace-name my-workspace --model phi-3.5-mini-instruct
 
-# Verify installation
-kubectl kaito version
+# Deploy with specific instance type and node count
+kubectl kaito deploy --workspace-name my-workspace --model llama-3.1-8b-instruct \
+  --instance-type Standard_NC96ads_A100_v4 --count 2
+
+# Deploy with model access secret for gated models
+kubectl kaito deploy --workspace-name my-workspace --model llama-3.3-70b-instruct \
+  --model-access-secret hf-token
+
+# Deploy with single adapter
+kubectl kaito deploy --workspace-name my-workspace --model phi-3-mini-128k-instruct \
+  --adapter phi-3-adapter="myregistry.azurecr.io/adapters/phi-3-adapter:v1",strength=1.0
+
+# Deploy with multiple adapters
+kubectl kaito deploy --workspace-name my-workspace --model phi-3-mini-128k-instruct \
+  --adapter adapter1="myregistry.azurecr.io/adapters/adapter1:v1",strength=0.8 \
+  --adapter adapter2="myregistry.azurecr.io/adapters/adapter2:v1",strength=1.0 \
+  --adapter adapter3="myregistry.azurecr.io/adapters/adapter3:v1",strength=0.5
+
+# Deploy with custom inference configuration
+kubectl kaito deploy --workspace-name my-workspace --model deepseek-r1-distill-qwen-14b \
+  --inference-config ds-inference-params
+
+# Deploy with specific node preferences  
+kubectl kaito deploy --workspace-name my-workspace --model mistral-7b-instruct \
+  --preferred-nodes node1,node2 --instance-type Standard_NC24ads_A100_v4
+
+# Deploy with label selector for node targeting
+kubectl kaito deploy --workspace-name my-workspace --model qwen2.5-coder-7b-instruct \
+  --label-selector apps=qwen-2-5-coder
+
+# Deploy with special annotations for testing
+kubectl kaito deploy --workspace-name my-workspace --model falcon-7b-instruct \
+  --bypass-resource-checks --enable-load-balancer
+
+# Deploy with dry-run to generate YAML manifest
+kubectl kaito deploy --workspace-name my-workspace --model phi-4-mini-instruct --dry-run
 ```
 
-### Deploy Your First Model
+#### Tuning Deployment
 
 ```bash
-# Check available models
-kubectl kaito preset list
+# Deploy QLoRA tuning with URL input and image output
+kubectl kaito deploy --workspace-name workspace-tuning-phi-3 --model phi-3-mini-128k-instruct \
+  --tuning --tuning-method qlora \
+  --input-urls "https://huggingface.co/datasets/philschmid/dolly-15k-oai-style/resolve/main/data/train-00000-of-00001-54e3756291ca09c6.parquet?download=true" \
+  --output-image "myregistry.azurecr.io/adapters/phi-3-tuned:v1" \
+  --output-image-push-secret my-registry-secret
 
-# Deploy Llama-2 model for inference
-kubectl kaito deploy --name my-llama --model llama-2-7b
+# Deploy QLoRA tuning with custom configuration
+kubectl kaito deploy --workspace-name workspace-tuning-falcon-7b --model falcon-7b \
+  --tuning --tuning-method qlora --tuning-config qlora-params-template \
+  --input-urls "https://huggingface.co/datasets/philschmid/dolly-15k-oai-style/resolve/main/data/train-00000-of-00001-54e3756291ca09c6.parquet?download=true" \
+  --output-image "myregistry.azurecr.io/adapters/falcon-7b-tuned:v1" \
+  --output-image-push-secret my-registry-secret
 
-# Preview deployment (dry-run)
-kubectl kaito deploy --name test-workspace --model llama-2-7b --dry-run
+# Deploy tuning with PVC volume sources
+kubectl kaito deploy --workspace-name workspace-tuning-phi-3-pvc --model phi-3-mini-128k-instruct \
+  --tuning --tuning-method qlora \
+  --input-pvc pvc-azurefile-input \
+  --output-pvc pvc-azurefile-output \
+  --instance-type Standard_NC6s_v3
 
-# Deploy with specific configuration
-kubectl kaito deploy --name llama-workspace --model llama-2-7b-chat --gpus 2 --preset chat
-
-# Deploy larger model with specific instance type
-kubectl kaito deploy --name gpu-model --model llama-2-70b-chat --instance-type Standard_NC24ads_A100_v4
+# Deploy tuning with private model image
+kubectl kaito deploy --workspace-name workspace-tuning-falcon-7b-private --model falcon-7b \
+  --tuning --tuning-method qlora --tuning-config my-qlora-params \
+  --model-access-mode private \
+  --model-image "aimodelsregistry.azurecr.io/kaito-falcon-7b:0.0.4" \
+  --input-urls "https://huggingface.co/datasets/philschmid/dolly-15k-oai-style/resolve/main/data/train-00000-of-00001-54e3756291ca09c6.parquet?download=true" \
+  --output-image "myregistry.azurecr.io/adapters/falcon-7b-private:v1" \
+  --output-image-push-secret my-registry-secret
 ```
 
-## 🛠️ Core Commands
-
-### Deploy Models for Inference
+#### Supporting Commands
 
 ```bash
-# Deploy popular models
-kubectl kaito deploy --name llama-workspace --model llama-3-8b-instruct
-kubectl kaito deploy --name falcon-workspace --model falcon-7b-instruct
-kubectl kaito deploy --name phi-workspace --model phi-3.5-mini-instruct
+# Check workspace status with detailed information
+kubectl kaito status --workspace-name my-workspace
+kubectl kaito status --workspace-name my-workspace --show-conditions
+kubectl kaito status --workspace-name my-workspace --show-worker-nodes
 
-# Deploy with specific GPU requirements
-kubectl kaito deploy --name gpu-model --model llama-3-70b-instruct --instance-type Standard_NC24ads_A100_v4
+# Get workspace inference endpoint
+kubectl kaito get-endpoint --workspace-name my-workspace
+
+# Interactive chat with deployed model
+kubectl kaito chat --workspace-name my-workspace
+kubectl kaito chat --workspace-name my-workspace --system-prompt "You are a helpful coding assistant"
+kubectl kaito chat --workspace-name my-workspace --temperature 0.7 --max-tokens 2048
+
+# List supported models
+kubectl kaito models list
+kubectl kaito models list --type text-generation
+kubectl kaito models describe phi-3.5-mini-instruct
+kubectl kaito models describe llama-3.1-8b-instruct --show-runtime-info
 ```
 
-### Fine-tune Models
+### New Core Commands
+
+#### Get-Endpoint Command
+
+The `get-endpoint` command retrieves the inference service endpoint for a deployed workspace, making it easy to programmatically access the model API.
 
 ```bash
-# Fine-tune with your dataset
-kubectl kaito tune --name custom-llama --model llama-2-7b --dataset gs://my-bucket/training-data --preset qlora
+# Get endpoint URL
+kubectl kaito get-endpoint --workspace-name my-workspace
+# Output: http://workspace-my-workspace.default.svc.cluster.local:80/chat/completions
 
-# Fine-tune with specific configuration
-kubectl kaito tune --name tuned-falcon --model falcon-7b --dataset s3://data/custom --instance-type Standard_NC12s_v3
-
-# Preview fine-tuning configuration
-kubectl kaito tune --name test-tune --model phi-2 --dataset gs://test-data --preset lora --dry-run
+# Get external endpoint when LoadBalancer is enabled
+kubectl kaito get-endpoint --workspace-name my-workspace --external
+# Output: http://20.123.45.67:80/chat/completions
 ```
 
-### Monitor and Debug
+#### Chat Command
+
+The `chat` command provides an interactive chat interface with deployed models.
 
 ```bash
-# Check workspace status
-kubectl kaito status                    # All workspaces
-kubectl kaito status my-workspace       # Specific workspace
-kubectl kaito status --all-namespaces   # Cross-namespace
+# Start basic interactive chat session
+kubectl kaito chat --workspace-name my-workspace
 
-# Stream logs
-kubectl kaito logs my-workspace --follow --tail 100
+# Chat with custom system prompt
+kubectl kaito chat --workspace-name my-workspace --system-prompt "You are a helpful coding assistant specialized in Python"
 
-# View workspace details
-kubectl kaito describe my-workspace
+# Chat with inference parameters
+kubectl kaito chat --workspace-name my-workspace --temperature 0.7 --max-tokens 2048 --top-p 0.9
+
+# Single question mode (non-interactive)
+kubectl kaito chat --workspace-name my-workspace --message "Explain machine learning in simple terms"
+
+# Chat with custom API parameters
+kubectl kaito chat --workspace-name my-workspace --stream=false --echo=true
 ```
 
-### Manage Workspaces
+**Interactive Chat Session Example:**
 
 ```bash
-# List all workspaces
-kubectl kaito list
+$ kubectl kaito chat --workspace-name code-assistant
+Connected to workspace: code-assistant (model: phi-3.5-mini-instruct)
+Type /help for commands or /quit to exit.
 
-# Delete workspace
-kubectl kaito delete my-workspace
+>>> Write a Python function to calculate fibonacci numbers
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
 
-# Force delete all workspaces in namespace
-kubectl kaito delete --all --force
+>>> Can you optimize this for better performance?
+Here's an optimized version using dynamic programming:
+
+def fibonacci_optimized(n):
+    if n <= 1:
+        return n
+    
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+>>> /help
+Available commands:
+  /help        - Show this help message
+  /quit        - Exit the chat session
+  /clear       - Clear the conversation history
+  /model       - Show current model information
+  /params      - Show current inference parameters
+  /set <param> <value> - Set inference parameter (temperature, max_tokens, etc.)
+
+>>> /quit
+Chat session ended.
 ```
 
-## 🤖 Supported AI Models
+### Complete Workflow Examples
 
-### Inference Models
-
-| **Model Family** | **Available Models**                                                                                                                                                                     | **Recommended GPU** |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| **Llama**        | llama-2-7b, llama-2-7b-chat, llama-2-13b, llama-2-13b-chat, llama-2-70b, llama-2-70b-chat, llama-3-8b-instruct, llama-3-70b-instruct                                                     | A100                |
-| **Falcon**       | falcon-7b, falcon-7b-instruct, falcon-40b, falcon-40b-instruct, falcon-180b, falcon-180b-chat                                                                                            | A100                |
-| **Phi**          | phi-2, phi-3-mini-4k-instruct, phi-3-mini-128k-instruct, phi-3-small-8k-instruct, phi-3-small-128k-instruct, phi-3-medium-4k-instruct, phi-3-medium-128k-instruct, phi-3.5-mini-instruct | V100/A100           |
-| **Mistral**      | mistral-7b, mistral-7b-instruct                                                                                                                                                          | V100/A100           |
-
-### Fine-tuning Methods
-
-- **QLora** - Quantized Low-Rank Adaptation (memory efficient)
-- **LoRA** - Low-Rank Adaptation (standard approach)
-
-### GPU Instance Types
-
-| **Instance Type**          | **GPU**    | **Memory** | **Best For**            |
-| -------------------------- | ---------- | ---------- | ----------------------- |
-| `Standard_NC12s_v3`        | Tesla V100 | 112 GB     | Small models (7B)       |
-| `Standard_NC24ads_A100_v4` | A100 40GB  | 440 GB     | Medium models (13B-40B) |
-| `Standard_ND96asr_v4`      | A100 80GB  | 900 GB     | Large models (70B+)     |
-
-## 🔧 Advanced Usage
-
-### Multi-namespace Deployment
+#### Deploy Phi-3.5 for Code Generation
 
 ```bash
-# Deploy to specific namespace
-kubectl kaito deploy --name prod-model --model llama-3-8b-instruct --namespace production
+# 1. List available models to find code-generation models
+kubectl kaito models list --type text-generation
+# Output shows: phi-3.5-mini-instruct, qwen2.5-coder-7b-instruct, etc.
 
-# Monitor across namespaces
-kubectl kaito status --all-namespaces
+# 2. Get details about the model
+kubectl kaito models describe phi-3.5-mini-instruct
+# Shows: runtime=tfs, version, tag, etc.
 
-# Namespace-specific operations
-kubectl kaito delete --all --namespace development
+# 3. Deploy the model for inference
+kubectl kaito deploy --workspace-name workspace-phi-3-5-mini \
+  --model phi-3.5-mini-instruct \
+  --instance-type Standard_NC24ads_A100_v4 \
+  --label-selector apps=phi-3-5
+
+# 4. Check deployment status
+kubectl kaito status --workspace-name workspace-phi-3-5-mini --show-conditions
+# Shows: ResourceReady, InferenceReady conditions
+
+# 5. Retrieve workspace endpoint (once ready)
+kubectl kaito get-endpoint --workspace-name workspace-phi-3-5-mini
+# Output: http://workspace-phi-3-5-mini.default.svc.cluster.local:80/chat/completions
+
+# 6. Test the model with interactive chat
+kubectl kaito chat --workspace-name workspace-phi-3-5-mini --system-prompt "You are a code generation assistant"
 ```
 
-### Configuration and Context
+#### Fine-tune Phi-3 with QLoRA
 
 ```bash
-# Use specific kubeconfig
-kubectl kaito --kubeconfig=/path/to/config deploy --name test --model phi-2
+# 1. Deploy QLoRA tuning job with Dolly dataset
+kubectl kaito deploy --workspace-name workspace-tuning-phi-3 \
+  --model phi-3-mini-128k-instruct \
+  --tuning --tuning-method qlora \
+  --input-urls "https://huggingface.co/datasets/philschmid/dolly-15k-oai-style/resolve/main/data/train-00000-of-00001-54e3756291ca09c6.parquet?download=true" \
+  --output-image "myregistry.azurecr.io/adapters/phi-3-tuned:v1" \
+  --output-image-push-secret my-registry-secret \
+  --instance-type Standard_NC24ads_A100_v4 \
+  --label-selector app=tuning-phi-3
 
-# Use different cluster context
-kubectl kaito --context=prod-cluster status
+# 2. Monitor tuning progress
+kubectl kaito status --workspace-name workspace-tuning-phi-3 --show-conditions
 
-# Set default namespace
-kubectl config set-context --current --namespace=ai-workloads
+# 3. Check if tuning completed successfully
+kubectl kaito status --workspace-name workspace-tuning-phi-3
+# Look for WorkspaceSucceeded condition
+
+# 4. Deploy the tuned model with adapter
+kubectl kaito deploy --workspace-name workspace-phi-3-mini-adapter \
+  --model phi-3-mini-128k-instruct \
+  --adapter phi-3-adapter="myregistry.azurecr.io/adapters/phi-3-tuned:v1",strength=1.0 \
+  --label-selector apps=phi-3-adapter
+
+# 5. Test the fine-tuned model
+kubectl kaito status --workspace-name workspace-phi-3-mini-adapter --show-conditions
+kubectl kaito get-endpoint --workspace-name workspace-phi-3-mini-adapter
+
+# 6. Chat with the fine-tuned model to test improvements
+kubectl kaito chat --workspace-name workspace-phi-3-mini-adapter --message "Generate a helpful response using the training data knowledge"
 ```
 
-### Batch Operations
+#### Deploy Llama-3.3 70B with Multi-Node Setup
 
 ```bash
-# Deploy multiple models
-kubectl kaito deploy --name llama-7b --model llama-2-7b &
-kubectl kaito deploy --name llama-13b --model llama-2-13b &
-kubectl kaito deploy --name falcon-7b --model falcon-7b-instruct &
-wait
+# 1. Create secret for HuggingFace token (required for gated model)
+kubectl create secret generic hf-token --from-literal=token=hf_your_token_here
 
-# Monitor all deployments
-kubectl kaito status --watch
+# 2. Deploy the large model with multi-node configuration
+kubectl kaito deploy --workspace-name workspace-llama-3-3-70b-instruct \
+  --model llama-3.3-70b-instruct \
+  --model-access-secret hf-token \
+  --instance-type Standard_NC48ads_A100_v4 \
+  --count 2 \
+  --label-selector apps=llama-3-3-70b-instruct
+
+# 3. Check status
+kubectl kaito status --workspace-name workspace-llama-3-3-70b-instruct --show-worker-nodes
+
+# 4. Get the service endpoint once ready
+kubectl kaito get-endpoint --workspace-name workspace-llama-3-3-70b-instruct --format json
+# Output: {"url": "http://workspace-llama-3-3-70b-instruct.default.svc.cluster.local:80", "ready": true}
+
+# 5. Test the large model with a complex question
+kubectl kaito chat --workspace-name workspace-llama-3-3-70b-instruct --temperature 0.3 --max-tokens 1024
 ```
 
-## 🔍 Troubleshooting
-
-### Common Issues
-
-<details>
-<summary><b>🚨 Workspace stuck in "Pending" state</b></summary>
-
-**Causes:**
-- Insufficient GPU quota
-- Node provisioning issues
-- Resource constraints
-
-**Solutions:**
-```bash
-# Check node status
-kubectl get nodes
-
-# View workspace events
-kubectl describe workspace <workspace-name>
-
-# Check machine provisioning
-kubectl get machine
-
-# Verify GPU quota (Azure)
-az vm list-usage --location eastus --query "[?contains(name.value, 'Standard_NC')]"
-```
-</details>
-
-<details>
-<summary><b>🚨 Pod failures or crashes</b></summary>
-
-**Diagnosis:**
-```bash
-# Check pod logs
-kubectl kaito logs <workspace-name>
-
-# View pod details
-kubectl get pods -l app.kubernetes.io/name=<workspace-name>
-
-# Check resource usage
-kubectl top pods
-```
-</details>
-
-<details>
-<summary><b>🚨 Plugin not found after installation</b></summary>
-
-**Solutions:**
-```bash
-# Verify Krew installation
-kubectl krew version
-
-# Check plugin list
-kubectl krew list | grep kaito
-
-# Reinstall if needed
-kubectl krew uninstall kaito
-kubectl krew install kaito
-```
-</details>
-
-### Debug Commands
+#### Deploy RAG Engine with Phi-3
 
 ```bash
-# Kaito operator status
-kubectl get pods -n kube-system | grep kaito
+# 1. First deploy a workspace for inference (if not using external URL)
+kubectl kaito deploy --workspace-name workspace-phi-3-inference \
+  --model phi-3.5-mini-instruct \
+  --instance-type Standard_NC6s_v3
 
-# Workspace diagnostics
-kubectl get workspace <name> -o yaml
-kubectl get events --field-selector involvedObject.name=<workspace-name>
+# 2. Deploy RAG engine with local embedding model
+kubectl kaito rag deploy --ragengine-name ragengine-start \
+  --embedding-model "BAAI/bge-small-en-v1.5" \
+  --inference-workspace workspace-phi-3-inference \
+  --instance-type Standard_NC6s_v3 \
+  --label-selector apps=ragengine-example
 
-# Resource monitoring
-kubectl top nodes
-kubectl top pods
+# 3. Check RAG engine status
+kubectl kaito status ragengine/ragengine-start
+
+# 4. Query the RAG system
+  kubectl kaito rag query --ragengine ragengine-start --question "What is KAITO?"
 ```
 
-## 📖 Examples
+## Technical Architecture
 
-### Complete ML Workflow
+### Implementation Architecture
 
-```bash
-#!/bin/bash
-# Complete AI model deployment workflow
+The kubectl plugin will be developed in a separate repository under the `kaito-project` organization on GitHub: `github.com/kaito-project/kaito-cli`.
 
-# 0. Check plugin version
-echo "📋 Checking kubectl-kaito version..."
-kubectl kaito version
-
-# 1. Explore available models
-echo "🔍 Discovering available models..."
-kubectl kaito preset list --model llama
-
-# 2. Preview deployment
-echo "🔍 Previewing deployment..."
-kubectl kaito deploy --name llama-inference --model llama-2-7b-chat --dry-run
-
-# 3. Deploy base model for inference
-echo "🚀 Deploying Llama-2 for inference..."
-kubectl kaito deploy --name llama-inference --model llama-2-7b-chat
-
-# 4. Wait for deployment
-echo "⏳ Waiting for deployment..."
-kubectl kaito status llama-inference --watch
-
-# 5. Fine-tune with custom data
-echo "🔧 Starting fine-tuning..."
-kubectl kaito tune --name llama-custom --model llama-2-7b --dataset gs://my-data --preset qlora
-
-# 6. Monitor both workspaces
-echo "📊 Monitoring workspaces..."
-kubectl kaito status --all-namespaces
-
-# 7. Clean up
-read -p "Press enter to clean up resources..."
-kubectl kaito delete llama-inference
-kubectl kaito delete llama-custom
+```mermaid
+graph TB
+    KubectlPlugin[kubectl kaito] --> PluginCore[Plugin Core]
+    PluginCore --> WorkspaceAPI[Workspace API v1beta1]
+    PluginCore --> ModelCatalog[Model Catalog]
+    PluginCore --> K8sClient[Kubernetes Client-go]
+    
+    ModelCatalog --> supported_models.yaml
+    WorkspaceAPI --> WorkspaceController[Workspace Controller]
+    
+    K8sClient --> KubeConfig[kubeconfig]
+    K8sClient --> RBAC[Kubernetes RBAC]
+    K8sClient --> WorkspaceCRD[Workspace CRDs]
+    
+    subgraph "KAITO Core"
+        WorkspaceController
+    end
 ```
-
-### Production Deployment
-
-```bash
-# Production-ready deployment with monitoring
-kubectl kaito deploy \
-  --name production-llama \
-  --model llama-2-70b-chat \
-  --instance-type Standard_ND96asr_v4 \
-  --namespace production
-
-# Set up monitoring
-kubectl kaito status production-llama --watch &
-kubectl kaito logs production-llama --follow > llama-prod.log &
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
-
-**Quick contributing steps:**
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes and add tests
-4. Run tests: `make test`
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## 🔗 Related Projects
-
-- **[Kaito](https://github.com/kaito-project/kaito)** - Kubernetes AI Toolchain Operator
-- **[GPU Provisioner](https://github.com/Azure/gpu-provisioner)** - Automatic GPU node provisioning
-- **[Karpenter](https://github.com/aws/karpenter)** - Kubernetes node lifecycle management
-
-## 📞 Support
-
-- 📚 **Documentation**: [Kaito Documentation](https://github.com/kaito-project/kaito/docs)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/kaito-project/kubectl-kaito/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/kaito-project/kubectl-kaito/discussions)
-- 📧 **Security**: [Security Policy](SECURITY.md)
-
----
-
-<div align="center">
-
-**[⭐ Star this project](https://github.com/kaito-project/kubectl-kaito)** if you find it useful!
-
-Made with ❤️ by the [Kaito Project](https://github.com/kaito-project) team
-
-</div> 

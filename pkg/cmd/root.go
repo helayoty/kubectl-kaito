@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/klog/v2"
 )
 
 // NewRootCmd creates the root command for kubectl-kaito
@@ -24,36 +25,39 @@ This plugin simplifies the deployment, management, and monitoring of AI models
 in Kubernetes clusters through Kaito workspaces.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Example: fmt.Sprintf(`  # Check plugin version
-  %s version
-
-  # Deploy a model for inference
-  %s deploy --name workspace-llama-3 --model llama-2-7b --gpus 1 --preset chat
-
-  # Fine-tune a model  
-  %s tune --name workspace-llama-3-tune --model llama-2-7b --dataset gs://teamA-ds --preset qlora
+		Example: fmt.Sprintf(`  # Deploy a model for inference
+  %s deploy --workspace-name my-llama --model llama-2-7b --instance-type Standard_NC6s_v3
 
   # Check workspace status
-  %s status workspace/workspace-llama-3
+  %s status --workspace-name my-llama
 
-  # List available presets
-  %s preset list
+  # Get model inference endpoint
+  %s get-endpoint --workspace-name my-llama
 
-  # Get logs from a workspace
-  %s logs workspace-llama-3`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName),
+  # Interactive chat with deployed model
+  %s chat --workspace-name my-llama
+
+  # List supported models
+  %s models list
+
+  # Deploy a RAG engine
+  %s rag deploy --name my-rag --vector-db faiss --index-service llamaindex`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			klog.V(4).Info("Initializing kubectl-kaito command")
+			return nil
+		},
 	}
 
-	// Add global flags
+	// Add global flags from kubectl
 	configFlags.AddFlags(cmd.PersistentFlags())
 
 	// Add subcommands
 	cmd.AddCommand(NewDeployCmd(configFlags))
-	cmd.AddCommand(NewTuneCmd(configFlags))
 	cmd.AddCommand(NewStatusCmd(configFlags))
-	cmd.AddCommand(NewLogsCmd(configFlags))
-	cmd.AddCommand(NewPresetCmd(configFlags))
-	cmd.AddCommand(NewDeleteCmd(configFlags))
-	cmd.AddCommand(NewVersionCmd(configFlags))
+	cmd.AddCommand(NewGetEndpointCmd(configFlags))
+	cmd.AddCommand(NewChatCmd(configFlags))
+	cmd.AddCommand(NewModelsCmd(configFlags))
+	cmd.AddCommand(NewRagCmd(configFlags))
 
 	return cmd
 }
