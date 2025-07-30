@@ -27,10 +27,10 @@ import (
 
 func TestNewRootCmd(t *testing.T) {
 	tests := []struct {
-		name           string
-		isPlugin       bool
-		expectedUse    string
-		expectedShort  string
+		name          string
+		isPlugin      bool
+		expectedUse   string
+		expectedShort string
 	}{
 		{
 			name:          "Standalone mode",
@@ -94,7 +94,7 @@ func TestRootCmdSubcommands(t *testing.T) {
 
 	expectedSubcommands := []string{
 		"deploy",
-		"status", 
+		"status",
 		"get-endpoint",
 		"chat",
 		"models",
@@ -152,7 +152,7 @@ func TestRootCmdFlags(t *testing.T) {
 		// Check for some common kubectl flags
 		expectedFlags := []string{
 			"kubeconfig",
-			"context", 
+			"context",
 			"namespace",
 			"server",
 		}

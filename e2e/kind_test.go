@@ -75,7 +75,7 @@ func isKindCluster(t *testing.T) bool {
 		t.Logf("Failed to get current context: %v", err)
 		return false
 	}
-	
+
 	// Kind clusters have context names like "kind-clustername"
 	return len(stdout) > 5 && stdout[:5] == "kind-"
-} 
+}

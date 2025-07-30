@@ -84,19 +84,19 @@ func isAKSCluster(t *testing.T) bool {
 		t.Logf("Failed to get current context: %v", err)
 		return false
 	}
-	
+
 	// AKS clusters typically don't have "kind-" prefix and often contain azure-related names
 	if len(stdout) > 5 && stdout[:5] == "kind-" {
 		return false
 	}
-	
+
 	// Additional check: AKS clusters usually have azure-related API server URLs
 	stdout, err = runKubectlCommand(t, testTimeout, "cluster-info")
 	if err != nil {
 		t.Logf("Failed to get cluster info: %v", err)
 		return false
 	}
-	
+
 	// AKS clusters have API server URLs containing "azmk8s.io"
 	return strings.Contains(stdout, "azmk8s.io")
 }
@@ -153,12 +153,12 @@ func testChatValidation(t *testing.T) {
 	t.Logf("✅ Chat validation correctly requires workspace")
 
 	// Test with workspace but no endpoint (should fail gracefully)
-	_, _, err = runCommand(t, testTimeout, 
-		"chat", 
+	_, _, err = runCommand(t, testTimeout,
+		"chat",
 		"--workspace-name", "nonexistent-workspace",
 		"--message", "hello")
 	if err == nil {
 		t.Errorf("Expected error for nonexistent workspace, but command succeeded")
 	}
 	t.Logf("✅ Chat validation correctly handles nonexistent workspace")
-} 
+}

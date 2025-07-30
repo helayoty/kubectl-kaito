@@ -30,9 +30,9 @@ import (
 
 func TestIsPluginDetection(t *testing.T) {
 	tests := []struct {
-		name       string
-		args0      string
-		isPlugin   bool
+		name     string
+		args0    string
+		isPlugin bool
 	}{
 		{
 			name:     "kubectl plugin format",

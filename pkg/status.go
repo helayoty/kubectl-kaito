@@ -38,12 +38,12 @@ import (
 type StatusOptions struct {
 	configFlags *genericclioptions.ConfigFlags
 
-	WorkspaceName    string
-	Namespace        string
-	AllNamespaces    bool
-	ShowConditions   bool
-	ShowWorkerNodes  bool
-	Watch            bool
+	WorkspaceName   string
+	Namespace       string
+	AllNamespaces   bool
+	ShowConditions  bool
+	ShowWorkerNodes bool
+	Watch           bool
 }
 
 // NewStatusCmd creates the status command
@@ -384,7 +384,7 @@ func (o *StatusOptions) printDeploymentStatus(workspace *unstructured.Unstructur
 				if condMap, ok := condition.(map[string]interface{}); ok {
 					condType, _ := condMap["type"].(string)
 					condStatus, _ := condMap["status"].(string)
-					
+
 					switch condType {
 					case "ResourceReady":
 						resourceReady = condStatus
@@ -499,7 +499,7 @@ func (o *StatusOptions) getNodeClaimName(workspace *unstructured.Unstructured) s
 			condType, _ := condMap["type"].(string)
 			message, _ := condMap["message"].(string)
 			reason, _ := condMap["reason"].(string)
-			
+
 			// Check NodeClaimReady condition first
 			if condType == "NodeClaimReady" {
 				// Try to extract NodeClaim name from message
@@ -519,7 +519,7 @@ func (o *StatusOptions) getNodeClaimName(workspace *unstructured.Unstructured) s
 		if condMap, ok := condition.(map[string]interface{}); ok {
 			message, _ := condMap["message"].(string)
 			reason, _ := condMap["reason"].(string)
-			
+
 			// Try to extract NodeClaim name from any condition message
 			if nodeClaimName := extractNodeClaimFromText(message); nodeClaimName != "" {
 				return nodeClaimName
@@ -539,12 +539,12 @@ func extractNodeClaimFromText(text string) string {
 	if text == "" {
 		return ""
 	}
-	
+
 	// Common patterns:
 	// "nodeClaim wsf30f0c090 is not ready"
 	// "check nodeClaim status timed out. nodeClaim ws9cdafdaa5 is not ready"
 	// "NodeClaim.karpenter.sh \"wsb80fa0bee\" not found"
-	
+
 	// Look for NodeClaim names that typically start with "ws" followed by alphanumeric characters
 	// This is more specific than just looking for any word after "nodeClaim"
 	re := regexp.MustCompile(`nodeClaim\s+(ws[a-zA-Z0-9]+)`)
@@ -552,14 +552,14 @@ func extractNodeClaimFromText(text string) string {
 	if len(matches) > 1 {
 		return matches[1]
 	}
-	
+
 	// Look for NodeClaim.karpenter.sh "name" pattern
 	re = regexp.MustCompile(`NodeClaim\.karpenter\.sh\s+"([^"]+)"`)
 	matches = re.FindStringSubmatch(text)
 	if len(matches) > 1 {
 		return matches[1]
 	}
-	
+
 	// Fallback: look for any alphanumeric string that looks like a NodeClaim ID after "nodeClaim"
 	// but exclude common words like "status", "plugins", etc.
 	re = regexp.MustCompile(`nodeClaim\s+([a-zA-Z0-9]{8,})`)
@@ -568,17 +568,17 @@ func extractNodeClaimFromText(text string) string {
 		name := matches[1]
 		// Exclude common words that are not NodeClaim names
 		excludeWords := map[string]bool{
-			"status": true,
+			"status":  true,
 			"plugins": true,
-			"ready": true,
+			"ready":   true,
 			"pending": true,
-			"failed": true,
+			"failed":  true,
 		}
 		if !excludeWords[strings.ToLower(name)] {
 			return name
 		}
 	}
-	
+
 	return ""
 }
 

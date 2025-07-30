@@ -90,9 +90,9 @@ func TestStatusOptionsValidation(t *testing.T) {
 
 func TestGetInstanceType(t *testing.T) {
 	tests := []struct {
-		name       string
-		workspace  *unstructured.Unstructured
-		expected   string
+		name      string
+		workspace *unstructured.Unstructured
+		expected  string
 	}{
 		{
 			name: "With instance type",
@@ -184,7 +184,7 @@ func TestGetAge(t *testing.T) {
 
 	options := &StatusOptions{}
 	result := options.getAge(workspace)
-	
+
 	// Should contain some time duration
 	assert.NotEqual(t, "<unknown>", result)
 	assert.NotEmpty(t, result)

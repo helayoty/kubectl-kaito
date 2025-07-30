@@ -184,7 +184,7 @@ func (o *ChatOptions) getInferenceEndpoint(ctx context.Context, clientset kubern
 	}
 
 	var baseEndpoint string
-	
+
 	// Try cluster-internal endpoint first
 	clusterEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
 	if o.canAccessClusterEndpoint(clusterEndpoint) {
@@ -217,28 +217,28 @@ func (o *ChatOptions) canAccessClusterEndpoint(endpoint string) bool {
 // checkLocalPortForward checks for common local port-forward endpoints
 func (o *ChatOptions) checkLocalPortForward() string {
 	commonPorts := []string{"8080", "8000", "3000", "5000"}
-	
+
 	for _, port := range commonPorts {
 		endpoint := fmt.Sprintf("http://localhost:%s", port)
 		if o.testEndpoint(endpoint) {
 			return endpoint
 		}
 	}
-	
+
 	return ""
 }
 
 // testEndpoint tests if an endpoint is accessible
 func (o *ChatOptions) testEndpoint(endpoint string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	
+
 	// Try a simple HEAD request to the base endpoint
 	resp, err := client.Head(endpoint)
 	if err != nil {
 		return false
 	}
 	defer resp.Body.Close()
-	
+
 	// Consider any response as success (including 404, since the service might not have a root endpoint)
 	return resp.StatusCode < 500
 }
@@ -448,9 +448,9 @@ func (o *ChatOptions) handleCommand(command, modelName string) bool {
 
 	case "/params":
 		fmt.Println("Current inference parameters:")
-			fmt.Printf("  Temperature: %.1f\n", o.Temperature)
-	fmt.Printf("  Max tokens: %d\n", o.MaxTokens)
-	fmt.Printf("  Top-p: %.1f\n", o.TopP)
+		fmt.Printf("  Temperature: %.1f\n", o.Temperature)
+		fmt.Printf("  Max tokens: %d\n", o.MaxTokens)
+		fmt.Printf("  Top-p: %.1f\n", o.TopP)
 		fmt.Println()
 
 	case "/set":
@@ -498,10 +498,6 @@ func (o *ChatOptions) setParameter(param, value string) {
 		} else {
 			fmt.Println("Invalid top_p value. Must be between 0.0 and 1.0")
 		}
-
-	
-
-	
 
 	default:
 		fmt.Printf("Unknown parameter: %s\n", param)
@@ -585,5 +581,3 @@ func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {
 	klog.Error("Unexpected response format")
 	return "", fmt.Errorf("unexpected response format")
 }
-
-

@@ -41,7 +41,7 @@ var (
 
 func TestMain(m *testing.M) {
 	fmt.Println("TestMain called - setting up e2e tests")
-	
+
 	// Build the binary before running tests
 	if err := buildBinary(); err != nil {
 		panic("Failed to build binary: " + err.Error())
@@ -437,4 +437,4 @@ func testInputValidation(t *testing.T) {
 			t.Logf("✅ %s validation successful", tt.name)
 		})
 	}
-} 
+}

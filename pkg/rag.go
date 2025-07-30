@@ -67,19 +67,19 @@ responses by retrieving relevant information from knowledge bases.`,
 // RAG Deploy Command
 func newRagDeployCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		ragName           string
-		namespace         string
-		vectorDB          string
-		indexService      string
-		embeddingModel    string
-		dataSource        string
-		chunkSize         int
-		chunkOverlap      int
-		accessMode        string
-		accessSecret      string
-		storageSize       string
-		storageClass      string
-		dryRun            bool
+		ragName        string
+		namespace      string
+		vectorDB       string
+		indexService   string
+		embeddingModel string
+		dataSource     string
+		chunkSize      int
+		chunkOverlap   int
+		accessMode     string
+		accessSecret   string
+		storageSize    string
+		storageClass   string
+		dryRun         bool
 	)
 
 	cmd := &cobra.Command{

@@ -53,7 +53,7 @@ func TestNewRagCmd(t *testing.T) {
 func TestNewRagDeployCmd(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	ragCmd := NewRagCmd(configFlags)
-	
+
 	var deployCmd *cobra.Command
 	for _, cmd := range ragCmd.Commands() {
 		if cmd.Name() == "deploy" {
@@ -112,7 +112,7 @@ func TestNewRagDeployCmd(t *testing.T) {
 func TestNewRagQueryCmd(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	ragCmd := NewRagCmd(configFlags)
-	
+
 	var queryCmd *cobra.Command
 	for _, cmd := range ragCmd.Commands() {
 		if cmd.Name() == "query" {
@@ -438,4 +438,3 @@ func TestContainsHelper(t *testing.T) {
 		})
 	}
 }
-
