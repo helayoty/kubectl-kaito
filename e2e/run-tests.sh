@@ -32,15 +32,12 @@ show_usage() {
     echo "Usage: $0 [OPTION]"
     echo ""
     echo "Options:"
-    echo "  basic     Run basic tests only (no cluster)"
     echo "  kind      Run Kind cluster tests"
     echo "  aks       Run AKS cluster tests (creates billable resources)"
-    echo "  all       Run all tests including AKS"
     echo "  check     Check prerequisites"
     echo "  help      Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 basic   # Quick tests, no cluster needed"
     echo "  $0 kind    # Local cluster tests with Kind"
     echo "  $0 aks     # Azure cloud tests (costs money)"
     echo ""
@@ -55,14 +52,6 @@ check_prerequisites() {
         echo -e "${RED}❌ Prerequisites check script not found${NC}"
         exit 1
     fi
-}
-
-# Function to run basic tests
-run_basic_tests() {
-    echo -e "${BLUE}🧪 Running basic e2e tests (no cluster required)...${NC}"
-    cd "$PROJECT_ROOT"
-    make test-e2e-basic
-    echo -e "${GREEN}✅ Basic tests completed${NC}"
 }
 
 # Function to run Kind tests
@@ -121,40 +110,13 @@ run_aks_tests() {
     echo -e "${GREEN}✅ AKS tests completed${NC}"
 }
 
-# Function to run all tests
-run_all_tests() {
-    echo -e "${YELLOW}⚠️  Warning: This will create billable Azure resources!${NC}"
-    echo ""
-    
-    # Get confirmation unless in CI
-    if [ -z "$CI" ]; then
-        echo -n "Do you want to run ALL tests including AKS? (y/N): "
-        read -r response
-        if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            echo "Cancelled."
-            exit 0
-        fi
-    fi
-    
-    echo -e "${BLUE}🧪 Running all e2e tests...${NC}"
-    cd "$PROJECT_ROOT"
-    make test-e2e-all
-    echo -e "${GREEN}✅ All tests completed${NC}"
-}
-
 # Main script logic
 case "${1:-help}" in
-    basic)
-        run_basic_tests
-        ;;
     kind)
         run_kind_tests
         ;;
     aks)
         run_aks_tests
-        ;;
-    all)
-        run_all_tests
         ;;
     check)
         check_prerequisites

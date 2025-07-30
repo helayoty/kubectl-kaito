@@ -39,8 +39,7 @@ and fine-tuning workloads using the Kubernetes AI Toolchain Operator (Kaito).
 
 This plugin simplifies the deployment, management, and monitoring of AI models
 in Kubernetes clusters through Kaito workspaces.`,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		SilenceUsage: true,
 		Example: fmt.Sprintf(`  # Deploy a model for inference
   %s deploy --workspace-name my-llama --model llama-2-7b --instance-type Standard_NC6s_v3
 

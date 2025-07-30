@@ -63,8 +63,7 @@ requests to the deployed model. The endpoint supports OpenAI-compatible APIs.`,
   kubectl kaito get-endpoint --workspace-name my-workspace --external`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.validate(); err != nil {
-				klog.Errorf("Validation failed: %v", err)
-				return fmt.Errorf("validation failed: %w", err)
+				return err
 			}
 			return o.run()
 		},
@@ -132,7 +131,6 @@ func (o *GetEndpointOptions) run() error {
 
 	// Check workspace status first
 	if err := o.checkWorkspaceReady(dynamicClient); err != nil {
-		klog.Errorf("Workspace not ready: %v", err)
 		return err
 	}
 
@@ -162,9 +160,9 @@ func (o *GetEndpointOptions) run() error {
 			klog.Errorf("Failed to marshal JSON: %v", err)
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
-		klog.Info(string(jsonOutput))
+		fmt.Println(string(jsonOutput))
 	} else {
-		klog.Info(endpoint)
+		fmt.Println(endpoint)
 	}
 
 	return nil
@@ -197,7 +195,6 @@ func (o *GetEndpointOptions) checkWorkspaceReady(dynamicClient dynamic.Interface
 
 	// Check workspace ready condition
 	if !o.isWorkspaceReady(status) {
-		klog.Warningf("Workspace %s is not ready yet", o.WorkspaceName)
 		return fmt.Errorf("workspace %s is not ready yet. Use 'kubectl kaito status --workspace-name %s' to check status", o.WorkspaceName, o.WorkspaceName)
 	}
 

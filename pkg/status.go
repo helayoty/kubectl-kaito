@@ -201,7 +201,7 @@ func (o *StatusOptions) listWorkspaces(dynamicClient dynamic.Interface) error {
 	}
 
 	if len(workspaceList.Items) == 0 {
-		klog.Info("No workspaces found")
+		fmt.Println("No workspaces found")
 		return nil
 	}
 
@@ -211,8 +211,8 @@ func (o *StatusOptions) listWorkspaces(dynamicClient dynamic.Interface) error {
 
 func (o *StatusOptions) watchWorkspace(dynamicClient dynamic.Interface) error {
 	klog.V(2).Infof("Starting watch for workspace: %s", o.WorkspaceName)
-	klog.Infof("Watching workspace %s for changes (Ctrl+C to stop)...", o.WorkspaceName)
-	klog.Info("")
+	fmt.Printf("Watching workspace %s for changes (Ctrl+C to stop)...\n", o.WorkspaceName)
+	fmt.Println()
 
 	gvr := schema.GroupVersionResource{
 		Group:    "kaito.sh",
@@ -231,9 +231,9 @@ func (o *StatusOptions) watchWorkspace(dynamicClient dynamic.Interface) error {
 
 	for event := range watcher.ResultChan() {
 		if workspace, ok := event.Object.(*unstructured.Unstructured); ok {
-			klog.Infof("=== %s at %s ===", strings.ToUpper(string(event.Type)), time.Now().Format(time.RFC3339))
+			fmt.Printf("=== %s at %s ===\n", strings.ToUpper(string(event.Type)), time.Now().Format(time.RFC3339))
 			o.printWorkspaceDetails(workspace)
-			klog.Info("")
+			fmt.Println()
 		}
 	}
 
@@ -274,35 +274,98 @@ func (o *StatusOptions) printWorkspaceTable(workspaces []unstructured.Unstructur
 func (o *StatusOptions) printWorkspaceDetails(workspace *unstructured.Unstructured) {
 	klog.V(4).Info("Printing workspace details")
 
-	klog.Info("Workspace Details")
-	klog.Info("=================")
-	klog.Infof("Name: %s", workspace.GetName())
-	klog.Infof("Namespace: %s", workspace.GetNamespace())
+	fmt.Println("Workspace Details")
+	fmt.Println("=================")
+	fmt.Printf("Name: %s\n", workspace.GetName())
+	fmt.Printf("Namespace: %s\n", workspace.GetNamespace())
 
-	// Get instance type and count
-	if spec, found, _ := unstructured.NestedMap(workspace.Object, "spec", "resource"); found {
-		if instanceType, found, _ := unstructured.NestedString(spec, "instanceType"); found {
-			klog.Infof("Instance Type: %s", instanceType)
-		}
-		if count, found, _ := unstructured.NestedInt64(spec, "count"); found {
-			klog.Infof("Node Count: %d", count)
+	// Get instance type and count from the top-level resource section (not spec.resource)
+	if resource, found := workspace.Object["resource"]; found {
+		if resourceMap, ok := resource.(map[string]interface{}); ok {
+			if instanceType, found := resourceMap["instanceType"]; found {
+				fmt.Printf("Instance Type: %s\n", instanceType)
+			}
+			if count, found := resourceMap["count"]; found {
+				fmt.Printf("Node Count: %v\n", count)
+			}
 		}
 	}
 
-	// Check if tuning or inference
-	if _, found, _ := unstructured.NestedMap(workspace.Object, "spec", "tuning"); found {
-		klog.Info("Mode: Fine-tuning")
+	// Check if tuning or inference (top-level, not spec.tuning)
+	if _, found := workspace.Object["tuning"]; found {
+		fmt.Println("Mode: Fine-tuning")
 	} else {
-		klog.Info("Mode: Inference")
+		fmt.Println("Mode: Inference")
 	}
 
-	// Status information
-	if status, found, _ := unstructured.NestedMap(workspace.Object, "status"); found {
-		klog.V(4).Infof("Status found: %v", status)
+	// Enhanced deployment status information
+	o.printDeploymentStatus(workspace)
+
+	fmt.Printf("Age: %s\n", o.getAge(workspace))
+	fmt.Println()
+}
+
+func (o *StatusOptions) printDeploymentStatus(workspace *unstructured.Unstructured) {
+	fmt.Println()
+	fmt.Println("Deployment Status:")
+	fmt.Println("==================")
+
+	// Get status information
+	status, found := workspace.Object["status"]
+	if !found {
+		fmt.Println("Status: Not Available")
+		return
 	}
 
-	klog.Infof("Age: %s", o.getAge(workspace))
-	klog.Info("")
+	statusMap, ok := status.(map[string]interface{})
+	if !ok {
+		fmt.Println("Status: Invalid Format")
+		return
+	}
+
+	// Print condition statuses
+	if conditions, found := statusMap["conditions"]; found {
+		if condList, ok := conditions.([]interface{}); ok {
+			resourceReady := "Unknown"
+			inferenceReady := "Unknown"
+			workspaceReady := "Unknown"
+
+			for _, condition := range condList {
+				if condMap, ok := condition.(map[string]interface{}); ok {
+					condType, _ := condMap["type"].(string)
+					condStatus, _ := condMap["status"].(string)
+					
+					switch condType {
+					case "ResourceReady":
+						resourceReady = condStatus
+					case "InferenceReady":
+						inferenceReady = condStatus
+					case "WorkspaceSucceeded":
+						workspaceReady = condStatus
+					}
+				}
+			}
+
+			fmt.Printf("Resource Ready: %s\n", resourceReady)
+			fmt.Printf("Inference Ready: %s\n", inferenceReady)
+			fmt.Printf("Workspace Ready: %s\n", workspaceReady)
+		}
+	}
+
+	// Print worker nodes if available
+	if workerNodes, found := statusMap["workerNodes"]; found {
+		if nodeList, ok := workerNodes.([]interface{}); ok && len(nodeList) > 0 {
+			fmt.Println()
+			fmt.Println("Worker Nodes:")
+			for _, node := range nodeList {
+				fmt.Printf("  %v\n", node)
+			}
+		}
+	}
+
+	// Print detailed conditions
+	fmt.Println()
+	o.printConditions(workspace)
 }
 
 func (o *StatusOptions) printConditions(workspace *unstructured.Unstructured) {
@@ -314,11 +377,11 @@ func (o *StatusOptions) printConditions(workspace *unstructured.Unstructured) {
 		return
 	}
 	if !found || len(conditions) == 0 {
-		klog.Info("Conditions: None")
+		fmt.Println("Detailed Conditions: None")
 		return
 	}
 
-	klog.Info("Conditions:")
+	fmt.Println("Detailed Conditions:")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	defer w.Flush()
@@ -337,22 +400,37 @@ func (o *StatusOptions) printConditions(workspace *unstructured.Unstructured) {
 		}
 	}
 
-	klog.Info("")
+	fmt.Println()
 }
 
 func (o *StatusOptions) printWorkerNodes(workspace *unstructured.Unstructured) {
 	klog.V(4).Info("Printing worker node information")
 
-	klog.Info("Worker Nodes:")
+	fmt.Println("Worker Nodes:")
 
-	// In a real implementation, this would fetch actual worker node information
-	// from the workspace status or related resources
-	klog.Info("  (Worker node information not available)")
-	klog.Info("")
+	// Check if worker nodes are available in the status
+	if status, found := workspace.Object["status"]; found {
+		if statusMap, ok := status.(map[string]interface{}); ok {
+			if workerNodes, found := statusMap["workerNodes"]; found {
+				if nodeList, ok := workerNodes.([]interface{}); ok && len(nodeList) > 0 {
+					for _, node := range nodeList {
+						fmt.Printf("  %v\n", node)
+					}
+				} else {
+					fmt.Println("  (No worker nodes provisioned yet)")
+				}
+			} else {
+				fmt.Println("  (Worker node information not available)")
+			}
+		}
+	} else {
+		fmt.Println("  (Workspace status not available)")
+	}
+	fmt.Println()
 }
 
 func (o *StatusOptions) getInstanceType(workspace *unstructured.Unstructured) string {
-	instanceType, found, err := unstructured.NestedString(workspace.Object, "spec", "resource", "instanceType")
+	instanceType, found, err := unstructured.NestedString(workspace.Object, "resource", "instanceType")
 	if err != nil || !found {
 		klog.V(6).Infof("Instance type not found for workspace %s", workspace.GetName())
 		return "Unknown"

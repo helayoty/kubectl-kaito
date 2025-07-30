@@ -29,9 +29,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/klog/v2"
-	"gopkg.in/yaml.v2"
 )
 
 // SupportedModelsURL is the official URL for Kaito supported models
@@ -329,7 +329,7 @@ official Kaito repository to ensure accuracy.`,
   # Refresh models cache (force fetch from repo)
   kubectl kaito models list --refresh`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			klog.Info("Use 'kubectl kaito models list' or 'kubectl kaito models describe <model>' for more information")
+			fmt.Println("Use 'kubectl kaito models list' or 'kubectl kaito models describe <model>' for more information")
 			return cmd.Help()
 		},
 	}
@@ -343,12 +343,12 @@ official Kaito repository to ensure accuracy.`,
 
 func newModelsListCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	var (
-		detailed    bool
-		modelType   string
-		tags        []string
-		sortBy      string
-		outputJSON  bool
-		refresh     bool
+		detailed   bool
+		modelType  string
+		tags       []string
+		sortBy     string
+		outputJSON bool
+		refresh    bool
 	)
 
 	cmd := &cobra.Command{
@@ -420,7 +420,7 @@ func runModelsList(detailed bool, modelType string, tags []string, sortBy string
 	klog.V(2).Info("Listing supported models")
 
 	if refresh {
-		klog.Info("Refreshing models from official Kaito repository...")
+		fmt.Println("Refreshing models from official Kaito repository...")
 	}
 
 	models := getSupportedModels()
@@ -440,13 +440,13 @@ func runModelsList(detailed bool, modelType string, tags []string, sortBy string
 	sortModels(models, sortBy)
 
 	if len(models) == 0 {
-		klog.Info("No models found matching the specified criteria")
+		fmt.Println("No models found matching the specified criteria")
 		return nil
 	}
 
 	if refresh {
-		klog.Infof("Successfully loaded %d models from official repository", len(models))
-		klog.Info("")
+		fmt.Printf("Successfully loaded %d models from official repository\n", len(models))
+		fmt.Println()
 	}
 
 	if outputJSON {
@@ -562,18 +562,18 @@ func printModelsDetailed(models []Model) error {
 
 	for i, model := range models {
 		if i > 0 {
-			klog.Info("")
+			fmt.Println()
 		}
 
-		klog.Infof("Name: %s", model.Name)
-		klog.Infof("Type: %s", model.Type)
-		klog.Infof("Runtime: %s", model.Runtime)
-		klog.Infof("Version: %s", model.Version)
-		klog.Infof("Description: %s", model.Description)
-		klog.Infof("GPU Memory: %s", model.GPUMemory)
-		klog.Infof("Node Range: %d-%d", model.MinNodes, model.MaxNodes)
+		fmt.Printf("Name: %s\n", model.Name)
+		fmt.Printf("Type: %s\n", model.Type)
+		fmt.Printf("Runtime: %s\n", model.Runtime)
+		fmt.Printf("Version: %s\n", model.Version)
+		fmt.Printf("Description: %s\n", model.Description)
+		fmt.Printf("GPU Memory: %s\n", model.GPUMemory)
+		fmt.Printf("Node Range: %d-%d\n", model.MinNodes, model.MaxNodes)
 		if len(model.Tags) > 0 {
-			klog.Infof("Tags: %s", strings.Join(model.Tags, ", "))
+			fmt.Printf("Tags: %s\n", strings.Join(model.Tags, ", "))
 		}
 	}
 
@@ -589,40 +589,40 @@ func printModelsJSON(models []Model) error {
 		return fmt.Errorf("failed to marshal models to JSON: %w", err)
 	}
 
-	klog.Info(string(jsonData))
+	fmt.Println(string(jsonData))
 	return nil
 }
 
 func printModelDetail(model Model) error {
 	klog.V(3).Infof("Printing detailed information for model: %s", model.Name)
 
-	klog.Infof("Model: %s", model.Name)
-	klog.Info("================")
-	klog.Info("")
-	klog.Infof("Description: %s", model.Description)
-	klog.Infof("Type: %s", model.Type)
-	klog.Infof("Runtime: %s", model.Runtime)
-	klog.Infof("Version: %s", model.Version)
-	klog.Info("")
-	klog.Info("Resource Requirements:")
-	klog.Infof("  GPU Memory: %s", model.GPUMemory)
-	klog.Infof("  Minimum Nodes: %d", model.MinNodes)
-	klog.Infof("  Maximum Nodes: %d", model.MaxNodes)
-	klog.Info("")
+	fmt.Printf("Model: %s\n", model.Name)
+	fmt.Println("================")
+	fmt.Println()
+	fmt.Printf("Description: %s\n", model.Description)
+	fmt.Printf("Type: %s\n", model.Type)
+	fmt.Printf("Runtime: %s\n", model.Runtime)
+	fmt.Printf("Version: %s\n", model.Version)
+	fmt.Println()
+	fmt.Println("Resource Requirements:")
+	fmt.Printf("  GPU Memory: %s\n", model.GPUMemory)
+	fmt.Printf("  Minimum Nodes: %d\n", model.MinNodes)
+	fmt.Printf("  Maximum Nodes: %d\n", model.MaxNodes)
+	fmt.Println()
 	if len(model.Tags) > 0 {
-		klog.Infof("Tags: %s", strings.Join(model.Tags, ", "))
-		klog.Info("")
+		fmt.Printf("Tags: %s\n", strings.Join(model.Tags, ", "))
+		fmt.Println()
 	}
 
-	klog.Info("Usage Example:")
-	klog.Infof("  kubectl kaito deploy --workspace-name my-workspace --model %s", model.Name)
+	fmt.Println("Usage Example:")
+	fmt.Printf("  kubectl kaito deploy --workspace-name my-workspace --model %s\n", model.Name)
 
 	if model.InstanceType != "" {
-		klog.Info("")
-		klog.Infof("  # With recommended instance type:")
-		klog.Infof("  kubectl kaito deploy --workspace-name my-workspace --model %s --instance-type %s", model.Name, model.InstanceType)
+		fmt.Println()
+		fmt.Println("  # With recommended instance type:")
+		fmt.Printf("  kubectl kaito deploy --workspace-name my-workspace --model %s --instance-type %s\n", model.Name, model.InstanceType)
 	}
 
-	klog.Info("")
+	fmt.Println()
 	return nil
 }

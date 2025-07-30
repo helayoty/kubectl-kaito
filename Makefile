@@ -43,34 +43,45 @@ unit-tests:
 
 # Run e2e tests
 .PHONY: test-e2e
-test-e2e: test-e2e-basic test-e2e-kind
+test-e2e: test-e2e-kind
 	@echo "E2E tests completed (excluding AKS tests)"
-
-# Run basic e2e tests (no cluster required)
-.PHONY: test-e2e-basic
-test-e2e-basic:
-	@echo "Running basic e2e tests (no cluster required)..."
-	cd e2e && go test -v -timeout=5m -run "TestBasicHelp|TestModelsCommand|TestInputValidation"
 
 # Run e2e tests with Kind cluster
 .PHONY: test-e2e-kind
 test-e2e-kind:
-	@echo "Running e2e tests with Kind cluster..."
+	@echo "Setting up Kind cluster and running e2e tests..."
+	./e2e/setup-kind.sh
 	cd e2e && go test -v -timeout=15m -run "TestKindClusterOperations"
+	./e2e/cleanup-kind.sh
 
 # Run e2e tests with AKS cluster (creates billable resources)
 .PHONY: test-e2e-aks
 test-e2e-aks:
 	@echo "Warning: This will create billable Azure resources!"
-	@echo "Running e2e tests with AKS cluster..."
+	@echo "Setting up AKS cluster and running e2e tests..."
+	./e2e/setup-aks.sh
 	cd e2e && go test -v -timeout=30m -run "TestAKSClusterOperations"
+	@echo "💡 To clean up AKS resources, run: ./e2e/cleanup-aks.sh"
 
-# Run all e2e tests including AKS (creates billable resources)
-.PHONY: test-e2e-all
-test-e2e-all:
-	@echo "Warning: This will create billable Azure resources!"
-	@echo "Running all e2e tests..."
-	cd e2e && go test -v -timeout=35m ./...
+# Setup Kind cluster for manual testing
+.PHONY: setup-kind
+setup-kind:
+	./e2e/setup-kind.sh
+
+# Setup AKS cluster for manual testing
+.PHONY: setup-aks
+setup-aks:
+	./e2e/setup-aks.sh
+
+# Cleanup Kind cluster
+.PHONY: cleanup-kind
+cleanup-kind:
+	./e2e/cleanup-kind.sh
+
+# Cleanup AKS cluster
+.PHONY: cleanup-aks
+cleanup-aks:
+	./e2e/cleanup-aks.sh
 
 # Lint the code
 .PHONY: lint
@@ -232,11 +243,13 @@ help:
 	@echo "  build        - Build the binary to bin/"
 	@echo "  build-all    - Build for multiple platforms"
 	@echo "  unit-tests   - Run unit tests with race detection and coverage"
-	@echo "  test-e2e     - Run e2e tests (basic + Kind cluster)"
-	@echo "  test-e2e-basic - Run basic e2e tests (no cluster)"
-	@echo "  test-e2e-kind - Run e2e tests with Kind cluster"
-	@echo "  test-e2e-aks - Run e2e tests with AKS cluster (billable)"
-	@echo "  test-e2e-all - Run all e2e tests including AKS (billable)"
+	@echo "  test-e2e     - Run e2e tests (Kind cluster only)"
+	@echo "  test-e2e-kind - Setup Kind cluster, run tests, and cleanup"
+	@echo "  test-e2e-aks - Setup AKS cluster and run tests (billable)"
+	@echo "  setup-kind   - Setup Kind cluster for manual testing"
+	@echo "  setup-aks    - Setup AKS cluster for manual testing (billable)"
+	@echo "  cleanup-kind - Cleanup Kind cluster"
+	@echo "  cleanup-aks  - Cleanup AKS cluster"
 	@echo "  lint         - Lint the code"
 	@echo "  fmt          - Format the code"
 	@echo "  vet          - Vet the code"

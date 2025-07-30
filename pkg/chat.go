@@ -167,7 +167,7 @@ func (o *ChatOptions) run() error {
 	// Get model name for display
 	modelName, err := o.getModelName(config)
 	if err != nil {
-		klog.Warningf("Could not get model name: %v", err)
+		klog.V(4).Infof("Could not get model name: %v", err)
 		modelName = "Unknown"
 	}
 
@@ -179,7 +179,7 @@ func (o *ChatOptions) run() error {
 			klog.Errorf("Failed to send message: %v", err)
 			return err
 		}
-		klog.Info(response)
+		fmt.Println(response)
 		return nil
 	}
 
@@ -265,17 +265,17 @@ func (o *ChatOptions) getModelName(config interface{}) (string, error) {
 func (o *ChatOptions) startInteractiveSession(endpoint, modelName string) error {
 	klog.V(2).Info("Starting interactive chat session")
 
-	klog.Infof("Connected to workspace: %s (model: %s)", o.WorkspaceName, modelName)
-	klog.Info("Type /help for commands or /quit to exit.")
-	klog.Info("")
+	fmt.Printf("Connected to workspace: %s (model: %s)\n", o.WorkspaceName, modelName)
+	fmt.Println("Type /help for commands or /quit to exit.")
+	fmt.Println()
 
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
-		klog.Info(">>> ")
+		fmt.Print(">>> ")
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
-				klog.Info("\nChat session ended.")
+				fmt.Println("\nChat session ended.")
 				return nil
 			}
 			klog.Errorf("Error reading input: %v", scanner.Err())
@@ -300,12 +300,12 @@ func (o *ChatOptions) startInteractiveSession(endpoint, modelName string) error 
 		// Send message and get response
 		response, err := o.sendMessage(endpoint, input)
 		if err != nil {
-			klog.Errorf("Error: %v", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			continue
 		}
 
-		klog.Info(response)
-		klog.Info("")
+		fmt.Println(response)
+		fmt.Println()
 	}
 }
 
@@ -319,53 +319,53 @@ func (o *ChatOptions) handleCommand(command, modelName string) bool {
 
 	switch parts[0] {
 	case "/help":
-		klog.Info("Available commands:")
-		klog.Info("  /help        - Show this help message")
-		klog.Info("  /quit        - Exit the chat session")
-		klog.Info("  /clear       - Clear the conversation history")
-		klog.Info("  /model       - Show current model information")
-		klog.Info("  /params      - Show current inference parameters")
-		klog.Info("  /set <param> <value> - Set inference parameter (temperature, max_tokens, etc.)")
-		klog.Info("")
+		fmt.Println("Available commands:")
+		fmt.Println("  /help        - Show this help message")
+		fmt.Println("  /quit        - Exit the chat session")
+		fmt.Println("  /clear       - Clear the conversation history")
+		fmt.Println("  /model       - Show current model information")
+		fmt.Println("  /params      - Show current inference parameters")
+		fmt.Println("  /set <param> <value> - Set inference parameter (temperature, max_tokens, etc.)")
+		fmt.Println()
 
 	case "/quit", "/exit":
-		klog.Info("Chat session ended.")
+		fmt.Println("Chat session ended.")
 		return true
 
 	case "/clear":
-		klog.Info("\033[2J\033[H") // Clear screen
-		klog.Infof("Connected to workspace: %s (model: %s)", o.WorkspaceName, modelName)
-		klog.Info("Type /help for commands or /quit to exit.")
-		klog.Info("")
+		fmt.Print("\033[2J\033[H") // Clear screen
+		fmt.Printf("Connected to workspace: %s (model: %s)\n", o.WorkspaceName, modelName)
+		fmt.Println("Type /help for commands or /quit to exit.")
+		fmt.Println()
 
 	case "/model":
-		klog.Infof("Current model: %s", modelName)
-		klog.Infof("Workspace: %s", o.WorkspaceName)
-		klog.Infof("Namespace: %s", o.Namespace)
-		klog.Info("")
+		fmt.Printf("Current model: %s\n", modelName)
+		fmt.Printf("Workspace: %s\n", o.WorkspaceName)
+		fmt.Printf("Namespace: %s\n", o.Namespace)
+		fmt.Println()
 
 	case "/params":
-		klog.Info("Current inference parameters:")
-		klog.Infof("  Temperature: %.1f", o.Temperature)
-		klog.Infof("  Max tokens: %d", o.MaxTokens)
-		klog.Infof("  Top-p: %.1f", o.TopP)
-		klog.Infof("  Stream: %t", o.Stream)
-		klog.Infof("  Echo: %t", o.Echo)
-		klog.Info("")
+		fmt.Println("Current inference parameters:")
+		fmt.Printf("  Temperature: %.1f\n", o.Temperature)
+		fmt.Printf("  Max tokens: %d\n", o.MaxTokens)
+		fmt.Printf("  Top-p: %.1f\n", o.TopP)
+		fmt.Printf("  Stream: %t\n", o.Stream)
+		fmt.Printf("  Echo: %t\n", o.Echo)
+		fmt.Println()
 
 	case "/set":
 		if len(parts) < 3 {
-			klog.Info("Usage: /set <parameter> <value>")
-			klog.Info("Available parameters: temperature, max_tokens, top_p, stream, echo")
-			klog.Info("")
+			fmt.Println("Usage: /set <parameter> <value>")
+			fmt.Println("Available parameters: temperature, max_tokens, top_p, stream, echo")
+			fmt.Println()
 			return false
 		}
 		o.setParameter(parts[1], parts[2])
 
 	default:
-		klog.Infof("Unknown command: %s", parts[0])
-		klog.Info("Type /help for available commands.")
-		klog.Info("")
+		fmt.Printf("Unknown command: %s\n", parts[0])
+		fmt.Println("Type /help for available commands.")
+		fmt.Println()
 	}
 
 	return false
@@ -378,48 +378,48 @@ func (o *ChatOptions) setParameter(param, value string) {
 	case "temperature":
 		if temp, err := strconv.ParseFloat(value, 64); err == nil && temp >= 0.0 && temp <= 2.0 {
 			o.Temperature = temp
-			klog.Infof("Temperature set to %.1f", temp)
+			fmt.Printf("Temperature set to %.1f\n", temp)
 		} else {
-			klog.Info("Invalid temperature value. Must be between 0.0 and 2.0")
+			fmt.Println("Invalid temperature value. Must be between 0.0 and 2.0")
 		}
 
 	case "max_tokens":
 		if tokens, err := strconv.Atoi(value); err == nil && tokens > 0 {
 			o.MaxTokens = tokens
-			klog.Infof("Max tokens set to %d", tokens)
+			fmt.Printf("Max tokens set to %d\n", tokens)
 		} else {
-			klog.Info("Invalid max_tokens value. Must be a positive integer")
+			fmt.Println("Invalid max_tokens value. Must be a positive integer")
 		}
 
 	case "top_p":
 		if topP, err := strconv.ParseFloat(value, 64); err == nil && topP >= 0.0 && topP <= 1.0 {
 			o.TopP = topP
-			klog.Infof("Top-p set to %.1f", topP)
+			fmt.Printf("Top-p set to %.1f\n", topP)
 		} else {
-			klog.Info("Invalid top_p value. Must be between 0.0 and 1.0")
+			fmt.Println("Invalid top_p value. Must be between 0.0 and 1.0")
 		}
 
 	case "stream":
 		if stream, err := strconv.ParseBool(value); err == nil {
 			o.Stream = stream
-			klog.Infof("Stream set to %t", stream)
+			fmt.Printf("Stream set to %t\n", stream)
 		} else {
-			klog.Info("Invalid stream value. Must be true or false")
+			fmt.Println("Invalid stream value. Must be true or false")
 		}
 
 	case "echo":
 		if echo, err := strconv.ParseBool(value); err == nil {
 			o.Echo = echo
-			klog.Infof("Echo set to %t", echo)
+			fmt.Printf("Echo set to %t\n", echo)
 		} else {
-			klog.Info("Invalid echo value. Must be true or false")
+			fmt.Println("Invalid echo value. Must be true or false")
 		}
 
 	default:
-		klog.Infof("Unknown parameter: %s", param)
-		klog.Info("Available parameters: temperature, max_tokens, top_p, stream, echo")
+		fmt.Printf("Unknown parameter: %s\n", param)
+		fmt.Println("Available parameters: temperature, max_tokens, top_p, stream, echo")
 	}
-	klog.Info("")
+	fmt.Println()
 }
 
 func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {

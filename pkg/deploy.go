@@ -97,8 +97,7 @@ the specified model according to Kaito's preset configurations.`,
   kubectl kaito deploy --workspace-name public-llama --model llama-2-7b --enable-load-balancer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.Validate(); err != nil {
-				klog.Errorf("Validation failed: %v", err)
-				return fmt.Errorf("validation failed: %w", err)
+				return err
 			}
 			return o.Run()
 		},
@@ -153,7 +152,6 @@ func (o *DeployOptions) Validate() error {
 
 	// Validate model name against official Kaito supported models
 	if err := ValidateModelName(o.Model); err != nil {
-		klog.Errorf("Model validation failed: %v", err)
 		return err
 	}
 
@@ -227,22 +225,22 @@ func (o *DeployOptions) Run() error {
 
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
-			klog.Warningf("Workspace %s already exists", o.WorkspaceName)
-			klog.Info("✓ Workspace already exists")
+			fmt.Printf("✓ Workspace %s already exists\n", o.WorkspaceName)
 			return nil
 		}
 		klog.Errorf("Failed to create workspace: %v", err)
 		return fmt.Errorf("failed to create workspace: %w", err)
 	}
 
-	klog.Infof("✓ Workspace %s created successfully", o.WorkspaceName)
-	klog.Infof("ℹ️  Use 'kubectl kaito status --workspace-name %s' to check status", o.WorkspaceName)
+	fmt.Printf("✓ Workspace %s created successfully\n", o.WorkspaceName)
+	fmt.Printf("ℹ️  Use 'kubectl kaito status --workspace-name %s' to check status\n", o.WorkspaceName)
 	return nil
 }
 
 func (o *DeployOptions) buildWorkspace() *unstructured.Unstructured {
 	klog.V(4).Info("Building workspace configuration")
 
+	// Create the base workspace object
 	workspace := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "kaito.sh/v1beta1",
@@ -251,8 +249,13 @@ func (o *DeployOptions) buildWorkspace() *unstructured.Unstructured {
 				"name":      o.WorkspaceName,
 				"namespace": o.Namespace,
 			},
-			"spec": o.createWorkspaceSpec(),
 		},
+	}
+
+	// Add the spec fields at the top level (not inside a spec field)
+	spec := o.createWorkspaceSpec()
+	for key, value := range spec {
+		workspace.Object[key] = value
 	}
 
 	return workspace
@@ -273,68 +276,77 @@ func (o *DeployOptions) createWorkspaceSpec() map[string]interface{} {
 		klog.V(4).Infof("Set node count to %d", o.Count)
 	}
 
-	// Add label selector if specified
+	// Add label selector - use provided one or create a default
+	var labelSelector map[string]interface{}
 	if len(o.LabelSelector) > 0 {
-		labelSelector := map[string]interface{}{
+		labelSelector = map[string]interface{}{
 			"matchLabels": o.LabelSelector,
 		}
-		spec["resource"].(map[string]interface{})["labelSelector"] = labelSelector
 		klog.V(4).Infof("Added label selector: %v", o.LabelSelector)
+	} else {
+		// Default label selector using workspace name
+		labelSelector = map[string]interface{}{
+			"matchLabels": map[string]interface{}{
+				"kaito.sh/workspace": o.WorkspaceName,
+			},
+		}
+		klog.V(4).Infof("Added default label selector for workspace: %s", o.WorkspaceName)
 	}
+	spec["resource"].(map[string]interface{})["labelSelector"] = labelSelector
 
 	// Configure inference or tuning
 	if o.Tuning {
 		klog.V(3).Info("Configuring tuning mode")
 		// Tuning configuration
 		tuning := map[string]interface{}{}
-		
+
 		if o.TuningMethod != "" {
 			tuning["method"] = o.TuningMethod
 		}
-		
+
 		if o.Model != "" {
 			tuning["preset"] = map[string]interface{}{
 				"name": o.Model,
 			}
 		}
-		
+
 		if len(o.InputURLs) > 0 {
 			tuning["input"] = map[string]interface{}{
 				"urls": o.InputURLs,
 			}
 		}
-		
+
 		if o.OutputImage != "" {
 			tuning["output"] = map[string]interface{}{
 				"image": o.OutputImage,
 			}
 		}
-		
+
 		spec["tuning"] = tuning
 	} else {
 		klog.V(3).Info("Configuring inference mode")
 		// Inference configuration
 		inference := map[string]interface{}{}
-		
+
 		if o.Model != "" {
 			inference["preset"] = map[string]interface{}{
 				"name": o.Model,
 			}
 		}
-		
+
 		// Add model access secret if specified
 		if o.ModelAccessSecret != "" {
 			inference["accessMode"] = "private"
 			inference["secretName"] = o.ModelAccessSecret
 			klog.V(4).Info("Added private model access configuration")
 		}
-		
+
 		// Add adapters if specified
 		if len(o.Adapters) > 0 {
 			inference["adapters"] = o.Adapters
 			klog.V(4).Infof("Added adapters: %v", o.Adapters)
 		}
-		
+
 		spec["inference"] = inference
 	}
 
@@ -367,41 +379,41 @@ func (o *DeployOptions) parseAdapter(adapter string) map[string]interface{} {
 func (o *DeployOptions) showDryRun() error {
 	klog.V(2).Info("Running in dry-run mode")
 
-	klog.Info("🔍 Dry-run mode: Showing what would be created")
-	klog.Info("")
-	klog.Info("Workspace Configuration:")
-	klog.Info("========================")
-	klog.Infof("Name: %s", o.WorkspaceName)
-	klog.Infof("Namespace: %s", o.Namespace)
-	klog.Infof("Model: %s", o.Model)
-	klog.Infof("Count: %d", o.Count)
+	fmt.Println("🔍 Dry-run mode: Showing what would be created")
+	fmt.Println()
+	fmt.Println("Workspace Configuration:")
+	fmt.Println("========================")
+	fmt.Printf("Name: %s\n", o.WorkspaceName)
+	fmt.Printf("Namespace: %s\n", o.Namespace)
+	fmt.Printf("Model: %s\n", o.Model)
+	fmt.Printf("Count: %d\n", o.Count)
 
 	if o.InstanceType != "" {
-		klog.Infof("Instance Type: %s", o.InstanceType)
+		fmt.Printf("Instance Type: %s\n", o.InstanceType)
 	}
 
 	if o.Tuning {
-		klog.Infof("Mode: Fine-tuning (%s)", o.TuningMethod)
+		fmt.Printf("Mode: Fine-tuning (%s)\n", o.TuningMethod)
 		if len(o.InputURLs) > 0 {
-			klog.Infof("Input URLs: %v", o.InputURLs)
+			fmt.Printf("Input URLs: %v\n", o.InputURLs)
 		}
 		if o.OutputImage != "" {
-			klog.Infof("Output Image: %s", o.OutputImage)
+			fmt.Printf("Output Image: %s\n", o.OutputImage)
 		}
 	} else {
-		klog.Info("Mode: Inference")
+		fmt.Println("Mode: Inference")
 		if len(o.Adapters) > 0 {
-			klog.Infof("Adapters: %v", o.Adapters)
+			fmt.Printf("Adapters: %v\n", o.Adapters)
 		}
 	}
 
 	if len(o.LabelSelector) > 0 {
-		klog.Infof("Label Selector: %v", o.LabelSelector)
+		fmt.Printf("Label Selector: %v\n", o.LabelSelector)
 	}
 
-	klog.Info("")
-	klog.Info("✓ Workspace definition is valid")
-	klog.Info("ℹ️  Run without --dry-run to create the workspace")
+	fmt.Println()
+	fmt.Println("✓ Workspace definition is valid")
+	fmt.Println("ℹ️  Run without --dry-run to create the workspace")
 
 	return nil
 }

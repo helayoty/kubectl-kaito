@@ -340,12 +340,11 @@ func runRagQuery(configFlags *genericclioptions.ConfigFlags, ragName, namespace,
 			klog.Errorf("Failed to marshal JSON response: %v", err)
 			return fmt.Errorf("failed to marshal JSON response: %w", err)
 		}
-		klog.Info(string(jsonOutput))
+		fmt.Println(string(jsonOutput))
 	} else {
 		if answer, ok := response["answer"].(string); ok {
-			klog.Info(answer)
+			fmt.Println(answer)
 		} else {
-			klog.Error("Invalid response format")
 			return fmt.Errorf("invalid response format")
 		}
 	}
