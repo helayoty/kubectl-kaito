@@ -23,7 +23,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-func TestSimpleDeployCmd(t *testing.T) {
+func TestDeployCmd(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	cmd := NewDeployCmd(configFlags)
 
@@ -46,7 +46,7 @@ func TestSimpleDeployCmd(t *testing.T) {
 	})
 }
 
-func TestSimpleDeployOptionsValidation(t *testing.T) {
+func TestDeployOptionsValidation(t *testing.T) {
 	tests := []struct {
 		name        string
 		options     DeployOptions

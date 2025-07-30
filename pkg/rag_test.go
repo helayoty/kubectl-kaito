@@ -303,7 +303,7 @@ func TestValidateRagQueryOptions(t *testing.T) {
 	}
 }
 
-func TestSimpleBuildRAGEngine(t *testing.T) {
+func TestBuildRAGEngine(t *testing.T) {
 	t.Run("Basic RAG engine creation", func(t *testing.T) {
 		ragEngine := buildRAGEngine(
 			"test-rag",

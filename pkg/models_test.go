@@ -23,7 +23,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-func TestSimpleModelsCmd(t *testing.T) {
+func TestModelsCmd(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	cmd := NewModelsCmd(configFlags)
 
@@ -48,7 +48,7 @@ func TestSimpleModelsCmd(t *testing.T) {
 	})
 }
 
-func TestSimpleValidateModelName(t *testing.T) {
+func TestValidateModelName(t *testing.T) {
 	tests := []struct {
 		name        string
 		modelName   string
@@ -78,7 +78,7 @@ func TestSimpleValidateModelName(t *testing.T) {
 	}
 }
 
-func TestSimpleGetSupportedModels(t *testing.T) {
+func TestGetSupportedModels(t *testing.T) {
 	t.Run("Returns models", func(t *testing.T) {
 		models := getSupportedModels()
 		assert.NotEmpty(t, models)
@@ -92,7 +92,7 @@ func TestSimpleGetSupportedModels(t *testing.T) {
 	})
 }
 
-func TestSimpleFilterModels(t *testing.T) {
+func TestFilterModels(t *testing.T) {
 	models := []Model{
 		{Name: "model1", Type: "LLM"},
 		{Name: "model2", Type: "Code"},
@@ -110,7 +110,7 @@ func TestSimpleFilterModels(t *testing.T) {
 	})
 }
 
-func TestSimpleSortModels(t *testing.T) {
+func TestSortModels(t *testing.T) {
 	models := []Model{
 		{Name: "zebra", Type: "LLM"},
 		{Name: "alpha", Type: "Code"},

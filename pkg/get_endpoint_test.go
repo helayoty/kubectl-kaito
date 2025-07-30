@@ -23,7 +23,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-func TestSimpleGetEndpointCmd(t *testing.T) {
+func TestGetEndpointCmd(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	cmd := NewGetEndpointCmd(configFlags)
 

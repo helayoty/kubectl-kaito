@@ -25,7 +25,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-func TestSimpleStatusCmd(t *testing.T) {
+func TestStatusCmd(t *testing.T) {
 	configFlags := genericclioptions.NewConfigFlags(true)
 	cmd := NewStatusCmd(configFlags)
 
@@ -51,7 +51,7 @@ func TestSimpleStatusCmd(t *testing.T) {
 	})
 }
 
-func TestSimpleStatusOptionsValidation(t *testing.T) {
+func TestStatusOptionsValidation(t *testing.T) {
 	tests := []struct {
 		name        string
 		options     StatusOptions
@@ -88,7 +88,7 @@ func TestSimpleStatusOptionsValidation(t *testing.T) {
 	}
 }
 
-func TestSimpleGetInstanceType(t *testing.T) {
+func TestGetInstanceType(t *testing.T) {
 	tests := []struct {
 		name       string
 		workspace  *unstructured.Unstructured
@@ -126,7 +126,7 @@ func TestSimpleGetInstanceType(t *testing.T) {
 	}
 }
 
-func TestSimpleGetConditionStatus(t *testing.T) {
+func TestGetConditionStatus(t *testing.T) {
 	tests := []struct {
 		name          string
 		workspace     *unstructured.Unstructured
@@ -170,7 +170,7 @@ func TestSimpleGetConditionStatus(t *testing.T) {
 	}
 }
 
-func TestSimpleGetAge(t *testing.T) {
+func TestGetAge(t *testing.T) {
 	now := time.Now()
 	oneHourAgo := now.Add(-time.Hour)
 
