@@ -52,13 +52,11 @@ func TestNewChatCmd(t *testing.T) {
 		flags := cmd.Flags()
 
 		optionalFlags := []string{
-			"message",
 			"temperature",
 			"top-p",
 			"max-tokens",
 			"system-prompt",
 			"stream",
-			"echo",
 		}
 
 		for _, flagName := range optionalFlags {
@@ -209,7 +207,7 @@ func TestChatOptionsDefaults(t *testing.T) {
 		assert.Equal(t, 0.0, options.TopP)       // Will be set to 0.9 in NewChatCmd
 		assert.Empty(t, options.SystemPrompt)
 		assert.False(t, options.Stream)
-		assert.False(t, options.Echo)
+
 	})
 }
 

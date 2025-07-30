@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -247,13 +248,13 @@ func (o *StatusOptions) printWorkspaceTable(workspaces []unstructured.Unstructur
 	defer w.Flush()
 
 	if o.AllNamespaces {
-		fmt.Fprintln(w, "NAMESPACE\tNAME\tINSTANCE\tRESOURCEREADY\tINFERENCEREADY\tWORKSPACEREADY\tAGE")
+		fmt.Fprintln(w, "NAMESPACE\tNAME\tNODECLAIM\tRESOURCEREADY\tINFERENCEREADY\tWORKSPACEREADY\tAGE")
 	} else {
-		fmt.Fprintln(w, "NAME\tINSTANCE\tRESOURCEREADY\tINFERENCEREADY\tWORKSPACEREADY\tAGE")
+		fmt.Fprintln(w, "NAME\tNODECLAIM\tRESOURCEREADY\tINFERENCEREADY\tWORKSPACEREADY\tAGE")
 	}
 
 	for _, workspace := range workspaces {
-		instanceType := o.getInstanceType(&workspace)
+		nodeClaimName := o.getNodeClaimName(&workspace)
 		resourceReady := o.getConditionStatus(&workspace, "ResourceReady")
 		inferenceReady := o.getConditionStatus(&workspace, "InferenceReady")
 		workspaceReady := o.getConditionStatus(&workspace, "WorkspaceReady")
@@ -261,11 +262,11 @@ func (o *StatusOptions) printWorkspaceTable(workspaces []unstructured.Unstructur
 
 		if o.AllNamespaces {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				workspace.GetNamespace(), workspace.GetName(), instanceType,
+				workspace.GetNamespace(), workspace.GetName(), nodeClaimName,
 				resourceReady, inferenceReady, workspaceReady, age)
 		} else {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				workspace.GetName(), instanceType,
+				workspace.GetName(), nodeClaimName,
 				resourceReady, inferenceReady, workspaceReady, age)
 		}
 	}
@@ -287,6 +288,39 @@ func (o *StatusOptions) printWorkspaceDetails(workspace *unstructured.Unstructur
 			}
 			if count, found := resourceMap["count"]; found {
 				fmt.Printf("Node Count: %v\n", count)
+			}
+			// Display preferred nodes if available
+			if preferredNodes, found := resourceMap["preferredNodes"]; found {
+				if nodeList, ok := preferredNodes.([]interface{}); ok && len(nodeList) > 0 {
+					fmt.Print("Preferred Nodes: ")
+					for i, node := range nodeList {
+						if i > 0 {
+							fmt.Print(", ")
+						}
+						fmt.Print(node)
+					}
+					fmt.Println()
+				}
+			}
+			
+			// Display node selector if available (alternative way to specify preferred nodes)
+			if labelSelector, found := resourceMap["labelSelector"]; found {
+				if labelMap, ok := labelSelector.(map[string]interface{}); ok {
+					if matchLabels, found := labelMap["matchLabels"]; found {
+						if labels, ok := matchLabels.(map[string]interface{}); ok && len(labels) > 0 {
+							fmt.Print("Node Selector: ")
+							first := true
+							for key, value := range labels {
+								if !first {
+									fmt.Print(", ")
+								}
+								fmt.Printf("%s=%v", key, value)
+								first = false
+							}
+							fmt.Println()
+						}
+					}
+				}
 			}
 		}
 	}
@@ -385,18 +419,16 @@ func (o *StatusOptions) printConditions(workspace *unstructured.Unstructured) {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	defer w.Flush()
-	fmt.Fprintln(w, "  TYPE\tSTATUS\tREASON\tMESSAGE\tLAST TRANSITION")
+	fmt.Fprintln(w, "  STATUS\tMESSAGE\tLAST TRANSITION")
 
 	for _, condition := range conditions {
 		if condMap, ok := condition.(map[string]interface{}); ok {
-			condType, _ := condMap["type"].(string)
 			status, _ := condMap["status"].(string)
-			reason, _ := condMap["reason"].(string)
 			message, _ := condMap["message"].(string)
 			lastTransitionTime, _ := condMap["lastTransitionTime"].(string)
 
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\n",
-				condType, status, reason, message, lastTransitionTime)
+			fmt.Fprintf(w, "  %s\t%s\t%s\n",
+				status, message, lastTransitionTime)
 		}
 	}
 
@@ -436,6 +468,102 @@ func (o *StatusOptions) getInstanceType(workspace *unstructured.Unstructured) st
 		return "Unknown"
 	}
 	return instanceType
+}
+
+func (o *StatusOptions) getNodeClaimName(workspace *unstructured.Unstructured) string {
+	conditions, found, err := unstructured.NestedSlice(workspace.Object, "status", "conditions")
+	if err != nil || !found {
+		klog.V(6).Infof("Conditions not found for workspace %s", workspace.GetName())
+		return "Unknown"
+	}
+
+	// Look for NodeClaim name in condition messages
+	for _, condition := range conditions {
+		if condMap, ok := condition.(map[string]interface{}); ok {
+			condType, _ := condMap["type"].(string)
+			message, _ := condMap["message"].(string)
+			reason, _ := condMap["reason"].(string)
+			
+			// Check NodeClaimReady condition first
+			if condType == "NodeClaimReady" {
+				// Try to extract NodeClaim name from message
+				if nodeClaimName := extractNodeClaimFromText(message); nodeClaimName != "" {
+					return nodeClaimName
+				}
+				// Try to extract NodeClaim name from reason
+				if nodeClaimName := extractNodeClaimFromText(reason); nodeClaimName != "" {
+					return nodeClaimName
+				}
+			}
+		}
+	}
+
+	// If NodeClaim not found in NodeClaimReady condition, check other conditions
+	for _, condition := range conditions {
+		if condMap, ok := condition.(map[string]interface{}); ok {
+			message, _ := condMap["message"].(string)
+			reason, _ := condMap["reason"].(string)
+			
+			// Try to extract NodeClaim name from any condition message
+			if nodeClaimName := extractNodeClaimFromText(message); nodeClaimName != "" {
+				return nodeClaimName
+			}
+			// Try to extract NodeClaim name from any condition reason
+			if nodeClaimName := extractNodeClaimFromText(reason); nodeClaimName != "" {
+				return nodeClaimName
+			}
+		}
+	}
+
+	return "Unknown"
+}
+
+// extractNodeClaimFromText extracts NodeClaim name from text like "nodeClaim ws9cdafdaa5 is not ready"
+func extractNodeClaimFromText(text string) string {
+	if text == "" {
+		return ""
+	}
+	
+	// Common patterns:
+	// "nodeClaim wsf30f0c090 is not ready"
+	// "check nodeClaim status timed out. nodeClaim ws9cdafdaa5 is not ready"
+	// "NodeClaim.karpenter.sh \"wsb80fa0bee\" not found"
+	
+	// Look for NodeClaim names that typically start with "ws" followed by alphanumeric characters
+	// This is more specific than just looking for any word after "nodeClaim"
+	re := regexp.MustCompile(`nodeClaim\s+(ws[a-zA-Z0-9]+)`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	
+	// Look for NodeClaim.karpenter.sh "name" pattern
+	re = regexp.MustCompile(`NodeClaim\.karpenter\.sh\s+"([^"]+)"`)
+	matches = re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	
+	// Fallback: look for any alphanumeric string that looks like a NodeClaim ID after "nodeClaim"
+	// but exclude common words like "status", "plugins", etc.
+	re = regexp.MustCompile(`nodeClaim\s+([a-zA-Z0-9]{8,})`)
+	matches = re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		name := matches[1]
+		// Exclude common words that are not NodeClaim names
+		excludeWords := map[string]bool{
+			"status": true,
+			"plugins": true,
+			"ready": true,
+			"pending": true,
+			"failed": true,
+		}
+		if !excludeWords[strings.ToLower(name)] {
+			return name
+		}
+	}
+	
+	return ""
 }
 
 func (o *StatusOptions) getConditionStatus(workspace *unstructured.Unstructured, conditionType string) string {

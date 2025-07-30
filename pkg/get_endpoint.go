@@ -20,6 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -221,6 +225,10 @@ func (o *GetEndpointOptions) isWorkspaceReady(status interface{}) bool {
 		return false
 	}
 
+	// For endpoint access, we need both ResourceReady and InferenceReady to be True
+	resourceReady := false
+	inferenceReady := false
+
 	for _, condition := range conditionsList {
 		condMap, ok := condition.(map[string]interface{})
 		if !ok {
@@ -228,17 +236,29 @@ func (o *GetEndpointOptions) isWorkspaceReady(status interface{}) bool {
 		}
 
 		condType, ok := condMap["type"].(string)
-		if !ok || condType != "WorkspaceReady" {
+		if !ok {
 			continue
 		}
 
 		condStatus, ok := condMap["status"].(string)
-		if ok && condStatus == "True" {
-			return true
+		if !ok {
+			continue
+		}
+
+		switch condType {
+		case "ResourceReady":
+			if condStatus == "True" {
+				resourceReady = true
+			}
+		case "InferenceReady":
+			if condStatus == "True" {
+				inferenceReady = true
+			}
 		}
 	}
 
-	return false
+	// Return true only if both resource and inference are ready
+	return resourceReady && inferenceReady
 }
 
 func (o *GetEndpointOptions) getServiceEndpoint(ctx context.Context, clientset kubernetes.Interface) (string, error) {
@@ -272,10 +292,60 @@ func (o *GetEndpointOptions) getServiceEndpoint(ctx context.Context, clientset k
 
 	// Return cluster-internal service endpoint
 	if svc.Spec.ClusterIP != "" && svc.Spec.ClusterIP != "None" {
-		endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
-		klog.V(3).Infof("Using cluster-internal endpoint: %s", endpoint)
-		return endpoint, nil
+		clusterEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
+
+		// Check if we can access the cluster endpoint (are we running inside the cluster?)
+		if o.canAccessClusterEndpoint(clusterEndpoint) {
+			klog.V(3).Infof("Using cluster-internal endpoint: %s", clusterEndpoint)
+			return clusterEndpoint, nil
+		}
+
+		// If we can't access cluster endpoint, check for local port-forward
+		localEndpoint := o.checkLocalPortForward()
+		if localEndpoint != "" {
+			klog.V(3).Infof("Using local port-forward endpoint: %s", localEndpoint)
+			return localEndpoint, nil
+		}
+
+		// Provide helpful alternatives instead of just an error
+		return "", fmt.Errorf("workspace endpoint is only accessible from within the cluster.\n\nOptions to access the workspace:\n\n1. Use port-forward to expose the endpoint locally:\n   kubectl port-forward svc/%s 8080:80\n   Then use: http://localhost:8080\n\n2. Use the chat command directly (handles port-forward detection automatically):\n   kubectl kaito chat --workspace-name %s", o.WorkspaceName, o.WorkspaceName)
 	}
 
 	return "", fmt.Errorf("service %s has no cluster IP", o.WorkspaceName)
+}
+
+// canAccessClusterEndpoint checks if we can reach the cluster-internal endpoint
+func (o *GetEndpointOptions) canAccessClusterEndpoint(endpoint string) bool {
+	// Try to resolve the cluster DNS name
+	_, err := net.LookupHost(strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://"))
+	return err == nil
+}
+
+// checkLocalPortForward checks for common local port-forward endpoints
+func (o *GetEndpointOptions) checkLocalPortForward() string {
+	commonPorts := []string{"8080", "8000", "3000", "5000"}
+
+	for _, port := range commonPorts {
+		endpoint := fmt.Sprintf("http://localhost:%s", port)
+		if o.testEndpoint(endpoint) {
+			return endpoint
+		}
+	}
+
+	return ""
+}
+
+// testEndpoint tests if an endpoint is accessible
+func (o *GetEndpointOptions) testEndpoint(endpoint string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Try a simple HEAD request to the base endpoint
+	resp, err := client.Head(endpoint)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Consider any response as success (including 404, since the service might not have a root endpoint)
+	return resp.StatusCode < 500
 }

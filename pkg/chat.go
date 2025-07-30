@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -48,9 +49,7 @@ type ChatOptions struct {
 	Temperature   float64
 	MaxTokens     int
 	TopP          float64
-	Message       string
 	Stream        bool
-	Echo          bool
 }
 
 // NewChatCmd creates the chat command
@@ -61,7 +60,6 @@ func NewChatCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		MaxTokens:   1024,
 		TopP:        0.9,
 		Stream:      false,
-		Echo:        false,
 	}
 
 	cmd := &cobra.Command{
@@ -70,18 +68,18 @@ func NewChatCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 		Long: `Start an interactive chat session with a deployed Kaito workspace model.
 
 This command provides a chat interface to interact with deployed models using
-OpenAI-compatible APIs. Supports both interactive and single-message modes.`,
+OpenAI-compatible APIs in interactive mode.`,
 		Example: `  # Start interactive chat session
   kubectl kaito chat --workspace-name my-llama
-
-  # Send a single message
-  kubectl kaito chat --workspace-name my-llama --message "What is AI?"
 
   # Configure inference parameters
   kubectl kaito chat --workspace-name my-llama --temperature 0.5 --max-tokens 512
 
   # Use system prompt for context
-  kubectl kaito chat --workspace-name my-llama --system-prompt "You are a helpful coding assistant"`,
+  kubectl kaito chat --workspace-name my-llama --system-prompt "You are a helpful coding assistant"
+
+  # Pipe input for non-interactive usage
+  echo "What is AI?" | kubectl kaito chat --workspace-name my-llama`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.validate(); err != nil {
 				klog.Errorf("Validation failed: %v", err)
@@ -97,9 +95,7 @@ OpenAI-compatible APIs. Supports both interactive and single-message modes.`,
 	cmd.Flags().Float64Var(&o.Temperature, "temperature", 0.7, "Temperature for response generation (0.0-2.0)")
 	cmd.Flags().IntVar(&o.MaxTokens, "max-tokens", 1024, "Maximum tokens in response")
 	cmd.Flags().Float64Var(&o.TopP, "top-p", 0.9, "Top-p (nucleus sampling) parameter (0.0-1.0)")
-	cmd.Flags().StringVarP(&o.Message, "message", "m", "", "Single message to send (non-interactive mode)")
 	cmd.Flags().BoolVar(&o.Stream, "stream", false, "Enable streaming responses")
-	cmd.Flags().BoolVar(&o.Echo, "echo", false, "Echo the input in the response")
 
 	if err := cmd.MarkFlagRequired("workspace-name"); err != nil {
 		klog.Errorf("Failed to mark workspace-name flag as required: %v", err)
@@ -171,18 +167,6 @@ func (o *ChatOptions) run() error {
 		modelName = "Unknown"
 	}
 
-	// Handle single message mode
-	if o.Message != "" {
-		klog.V(3).Info("Sending single message")
-		response, err := o.sendMessage(endpoint, o.Message)
-		if err != nil {
-			klog.Errorf("Failed to send message: %v", err)
-			return err
-		}
-		fmt.Println(response)
-		return nil
-	}
-
 	// Start interactive session
 	return o.startInteractiveSession(endpoint, modelName)
 }
@@ -201,10 +185,64 @@ func (o *ChatOptions) getInferenceEndpoint(ctx context.Context, clientset kubern
 		return "", fmt.Errorf("service %s has no cluster IP", o.WorkspaceName)
 	}
 
+	var baseEndpoint string
+	
+	// Try cluster-internal endpoint first
+	clusterEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
+	if o.canAccessClusterEndpoint(clusterEndpoint) {
+		baseEndpoint = clusterEndpoint
+		klog.V(3).Infof("Using cluster-internal endpoint: %s", baseEndpoint)
+	} else {
+		// Check for local port-forward
+		localEndpoint := o.checkLocalPortForward()
+		if localEndpoint != "" {
+			baseEndpoint = localEndpoint
+			klog.V(3).Infof("Using local port-forward endpoint: %s", baseEndpoint)
+		} else {
+			return "", fmt.Errorf("workspace endpoint is not accessible.\n\nTo chat with this workspace, first set up port-forwarding:\n  kubectl port-forward svc/%s 8080:80\n\nThen try the chat command again (it will automatically detect the local endpoint)", o.WorkspaceName)
+		}
+	}
+
 	// Return OpenAI-compatible chat endpoint
-	endpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/v1/chat/completions", o.WorkspaceName, o.Namespace)
-	klog.V(3).Infof("Endpoint: %s", endpoint)
-	return endpoint, nil
+	chatEndpoint := fmt.Sprintf("%s/v1/chat/completions", baseEndpoint)
+	klog.V(3).Infof("Chat endpoint: %s", chatEndpoint)
+	return chatEndpoint, nil
+}
+
+// canAccessClusterEndpoint checks if we can reach the cluster-internal endpoint
+func (o *ChatOptions) canAccessClusterEndpoint(endpoint string) bool {
+	// Try to resolve the cluster DNS name
+	_, err := net.LookupHost(strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://"))
+	return err == nil
+}
+
+// checkLocalPortForward checks for common local port-forward endpoints
+func (o *ChatOptions) checkLocalPortForward() string {
+	commonPorts := []string{"8080", "8000", "3000", "5000"}
+	
+	for _, port := range commonPorts {
+		endpoint := fmt.Sprintf("http://localhost:%s", port)
+		if o.testEndpoint(endpoint) {
+			return endpoint
+		}
+	}
+	
+	return ""
+}
+
+// testEndpoint tests if an endpoint is accessible
+func (o *ChatOptions) testEndpoint(endpoint string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	
+	// Try a simple HEAD request to the base endpoint
+	resp, err := client.Head(endpoint)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	
+	// Consider any response as success (including 404, since the service might not have a root endpoint)
+	return resp.StatusCode < 500
 }
 
 func (o *ChatOptions) getModelName(config interface{}) (string, error) {
@@ -240,7 +278,9 @@ func (o *ChatOptions) getModelName(config interface{}) (string, error) {
 		return "", fmt.Errorf("failed to get workspace %s: %w", o.WorkspaceName, err)
 	}
 
-	// Try to get model name from spec
+	// Try to get model name from different possible locations in the workspace spec
+	
+	// First try: spec.inference.preset.name
 	if spec, found := workspace.Object["spec"]; found {
 		if specMap, ok := spec.(map[string]interface{}); ok {
 			if inference, found := specMap["inference"]; found {
@@ -254,6 +294,32 @@ func (o *ChatOptions) getModelName(config interface{}) (string, error) {
 							}
 						}
 					}
+				}
+			}
+		}
+	}
+	
+	// Second try: top-level inference.preset.name (for newer workspace structure)
+	if inference, found := workspace.Object["inference"]; found {
+		if inferenceMap, ok := inference.(map[string]interface{}); ok {
+			if preset, found := inferenceMap["preset"]; found {
+				if presetMap, ok := preset.(map[string]interface{}); ok {
+					if name, found := presetMap["name"]; found {
+						if nameStr, ok := name.(string); ok {
+							return nameStr, nil
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Third try: Check if there's a model field directly in inference
+	if inference, found := workspace.Object["inference"]; found {
+		if inferenceMap, ok := inference.(map[string]interface{}); ok {
+			if model, found := inferenceMap["model"]; found {
+				if modelStr, ok := model.(string); ok {
+					return modelStr, nil
 				}
 			}
 		}
@@ -346,17 +412,16 @@ func (o *ChatOptions) handleCommand(command, modelName string) bool {
 
 	case "/params":
 		fmt.Println("Current inference parameters:")
-		fmt.Printf("  Temperature: %.1f\n", o.Temperature)
-		fmt.Printf("  Max tokens: %d\n", o.MaxTokens)
-		fmt.Printf("  Top-p: %.1f\n", o.TopP)
-		fmt.Printf("  Stream: %t\n", o.Stream)
-		fmt.Printf("  Echo: %t\n", o.Echo)
+			fmt.Printf("  Temperature: %.1f\n", o.Temperature)
+	fmt.Printf("  Max tokens: %d\n", o.MaxTokens)
+	fmt.Printf("  Top-p: %.1f\n", o.TopP)
+	fmt.Printf("  Stream: %t\n", o.Stream)
 		fmt.Println()
 
 	case "/set":
 		if len(parts) < 3 {
 			fmt.Println("Usage: /set <parameter> <value>")
-			fmt.Println("Available parameters: temperature, max_tokens, top_p, stream, echo")
+			fmt.Println("Available parameters: temperature, max_tokens, top_p, stream")
 			fmt.Println()
 			return false
 		}
@@ -407,17 +472,11 @@ func (o *ChatOptions) setParameter(param, value string) {
 			fmt.Println("Invalid stream value. Must be true or false")
 		}
 
-	case "echo":
-		if echo, err := strconv.ParseBool(value); err == nil {
-			o.Echo = echo
-			fmt.Printf("Echo set to %t\n", echo)
-		} else {
-			fmt.Println("Invalid echo value. Must be true or false")
-		}
+	
 
 	default:
 		fmt.Printf("Unknown parameter: %s\n", param)
-		fmt.Println("Available parameters: temperature, max_tokens, top_p, stream, echo")
+		fmt.Println("Available parameters: temperature, max_tokens, top_p, stream")
 	}
 	fmt.Println()
 }
@@ -437,7 +496,6 @@ func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {
 		"max_tokens":  o.MaxTokens,
 		"top_p":       o.TopP,
 		"stream":      o.Stream,
-		"echo":        o.Echo,
 	}
 
 	// Add system prompt if provided
