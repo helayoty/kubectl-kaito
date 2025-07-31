@@ -6,6 +6,7 @@ on:
 
 permissions:
   pull-requests: read
+  id-token: write
 
 jobs:
   pr-title-check:

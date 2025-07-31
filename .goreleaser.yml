@@ -1,15 +1,15 @@
-project_name: kubectl-kaito
-
+version: 2
 before:
   hooks:
     - go mod tidy
-    - go mod download
-    - make test
 
 builds:
-  - main: ./cmd/kubectl-kaito
+  - id: kubectl-kaito
+    main: ./cmd/kubectl-kaito
+    binary: bin/kubectl-kaito
     env:
       - CGO_ENABLED=0
+      - GO111MODULE=on
     goos:
       - linux
       - windows
@@ -23,174 +23,48 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X github.com/kaito-project/kubectl-kaito/pkg/cmd.version={{.Version}}
-      - -X github.com/kaito-project/kubectl-kaito/pkg/cmd.commit={{.Commit}}
-      - -X github.com/kaito-project/kubectl-kaito/pkg/cmd.date={{.Date}}
-    binary: kubectl-kaito
+      - -X {{.ModulePath}}/pkg/cmd.version={{.Version}}
+      - -X {{.ModulePath}}/pkg/cmd.commit={{.Commit}}
+      - -X {{.ModulePath}}/pkg/cmd.date={{.Date}}
 
 archives:
-  - format: tar.gz
-    name_template: >-
+  - name_template: >-
       {{ .ProjectName }}-{{ .Version }}-
       {{- .Os }}-
       {{- if eq .Arch "amd64" }}amd64
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
-      - README.md
-      - LICENSE
-      - krew/kaito.yaml
-
-checksum:
-  name_template: "checksums.txt"
-
-snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+    - LICENSE
 
 changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
-      - "^chore:"
-      - "^build:"
-      - "merge conflict"
-      - Merge pull request
-      - Merge remote-tracking branch
-      - Merge branch
-      - go mod tidy
   groups:
-    - title: "New Features"
-      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
-      order: 0
-    - title: "Bug Fixes"
-      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
-      order: 1
-    - title: "Performance Improvements"
-      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
-      order: 2
-    - title: "Documentation Updates"
-      regexp: '^.*?doc(\([[:word:]]+\))??!?:.+$'
-      order: 3
-    - title: "Other Changes"
-      order: 999
+    - title: Features 🌈
+      regexp: ^.*feat[(\\w)]*:+.*$
+    - title: Bug Fixes 🐞
+      regexp: ^.*fix[(\\w)]*:+.*$
+    - title: Code Refactoring 💎
+      regexp: ^.*refactor[(\\w)]*:+.*$
+    - title: Code Style 🎶
+      regexp: ^.*style[(\\w)]*:+.*$
+    - title: Continuous Integration 💜
+      regexp: ^.*ci[(\\w)]*:+.*$
+    - title: Documentation 📘
+      regexp: ^.*docs[(\\w)]*:+.*$
+    - title: Maintenance 🔧
+      regexp: ^.*chore[(\\w)]*:+.*$
+    - title: Performance Improvements 🚀
+      regexp: ^.*perf[(\\w)]*:+.*$
+    - title: Revert Change ◀️
+      regexp: ^.*revert[(\\w)]*:+.*$
+    - title: Security Fix 🛡️
+      regexp: ^.*security[(\\w)]*:+.*$
+    - title: Testing 💚
+      regexp: ^.*test[(\\w)]*:+.*$
 
 release:
-  github:
-    owner: kaito-project
-    name: kubectl-kaito
-  draft: false
   prerelease: auto
-  mode: replace
+  make_latest: true
   header: |
-    ## kubectl kaito {{ .Tag }}
-
-    Welcome to this new release of kubectl-kaito! 🚀
-
-    ### Available Commands
-    - `kubectl kaito deploy` - Deploy AI models for inference
-    - `kubectl kaito status` - Check workspace status and health
-    - `kubectl kaito get-endpoint` - Get inference service endpoints
-    - `kubectl kaito chat` - Interactive chat with deployed models
-    - `kubectl kaito models` - List and describe available models
-    - `kubectl kaito rag` - Deploy and query RAG engines
-
-    ### Installation
-
-    #### Via Krew (Recommended)
-    ```bash
-    kubectl krew install --manifest-url https://github.com/kaito-project/kubectl-kaito/releases/download/{{ .Tag }}/kaito.yaml
-    ```
-
-    #### Direct Download
-    Download the appropriate binary for your platform from the assets below.
-
-    ### What's Changed
-
-  footer: |
-
-    ---
-
-    **Full Changelog**: https://github.com/kaito-project/kubectl-kaito/compare/{{ .PreviousTag }}...{{ .Tag }}
-
-    For more information about Kaito, visit: https://github.com/kaito-project/kaito
-
-# Krew plugin manifest generation
-krews:
-  - name: kaito
-    repository:
-      owner: kaito-project
-      name: kubectl-kaito
-      # For private krew index (custom plugin index)
-      # Uncomment and set your GitHub token for publishing to custom index
-      # token: "{{ .Env.KREW_GITHUB_TOKEN }}"
-    url_template: "https://github.com/kaito-project/kubectl-kaito/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
-    commit_msg_template: "Krew plugin update for {{ .ProjectName }} version {{ .Tag }}"
-    commit_author:
-      name: kaito-release-bot
-      email: "kaito-project@users.noreply.github.com"
-    homepage: "https://github.com/kaito-project/kaito"
-    short_description: "Manage AI/ML model inference and RAG with Kaito"
-    description: |
-      kubectl-kaito is a kubectl plugin for managing AI/ML model inference 
-      and RAG (Retrieval-Augmented Generation) workloads using the Kubernetes 
-      AI Toolchain Operator (Kaito).
-
-      This plugin simplifies the deployment, management, and monitoring of AI models
-      in Kubernetes clusters through Kaito workspaces and RAG engines.
-
-      Features:
-      - Deploy AI models for inference with automatic GPU provisioning
-      - Manage workspace lifecycle and monitor status with real-time updates
-      - Interactive chat with deployed models using OpenAI-compatible API
-      - Deploy and query RAG engines for document-based question answering
-      - Discover and validate available model presets from Kaito repository
-      - Get inference endpoints for programmatic access to deployed models
-    caveats: |
-      This plugin requires:
-      * kubectl to be installed and configured
-      * Access to a Kubernetes cluster with Kaito operator installed
-      * Proper RBAC permissions for managing Kaito workspaces
-
-      For installation and setup instructions, visit:
-      https://github.com/kaito-project/kaito
-
-# Publisher configuration for GitHub releases
-publishers:
-  - name: github
-    checksum: true
-    signature: false
-
-# Docker images (optional)
-dockers:
-  - image_templates:
-      - "ghcr.io/kaito-project/kubectl-kaito:{{ .Tag }}"
-      - "ghcr.io/kaito-project/kubectl-kaito:latest"
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source=https://github.com/kaito-project/kubectl-kaito"
-    skip_push: auto
-
-# SBOM generation
-sboms:
-  - artifacts: archive
-
-# Metadata
-metadata:
-  mod_timestamp: "{{ .CommitTimestamp }}"
-
-# Environment variables
-env:
-  - COSIGN_EXPERIMENTAL=1
+    ## kubectl kaito Plugin {{ .Tag }}  - {{ time "2006-01-02" }}

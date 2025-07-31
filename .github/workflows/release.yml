@@ -1,35 +1,20 @@
-name: Release
+name: Create release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g., v1.0.0)'
+        description: "Tag to release (e.g., v1.0.0)"
         required: true
         type: string
-      draft:
-        description: 'Create draft release'
-        required: false
-        default: false
-        type: boolean
-      prerelease:
-        description: 'Mark as pre-release'
-        required: false
-        default: false
-        type: boolean
 
 env:
   GO_VERSION: "1.24"
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 permissions:
+  id-token: write
   contents: write
   packages: write
-  security-events: write
 
 jobs:
   pre-release-validation:
@@ -37,117 +22,55 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get-version.outputs.version }}
-      is-prerelease: ${{ steps.version-check.outputs.is-prerelease }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout the repository at the release branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          submodules: true
           fetch-depth: 0
 
-      - name: Get version
-        id: get-version
+      - name: Validate inputs
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.tag }}"
-          else
-            VERSION=${GITHUB_REF#refs/tags/}
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Release version: ${VERSION}"
-
-      - name: Validate version format
-        run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
-          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$ ]]; then
-            echo "Invalid version format: ${VERSION}"
-            echo "Expected format: vX.Y.Z or vX.Y.Z-prerelease"
+          echo "Creating release ${{ github.event.inputs.tag }}"
+          if [[ ! "${{ github.event.inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Release version must follow format vX.Y.Z"
             exit 1
           fi
-          echo "Version format is valid: ${VERSION}"
 
-      - name: Check version consistency
-        id: version-check
+      - id: check-tag
+        name: Check for Tag
         run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
-          
-          # Check if this is a pre-release
-          if [[ "${VERSION}" =~ -[a-zA-Z] ]]; then
-            echo "is-prerelease=true" >> $GITHUB_OUTPUT
-            echo "🚧 This is a pre-release version"
+          TAG=${{ github.event.inputs.tag }}
+          if git show-ref --tags --verify --quiet "refs/tags/${TAG}"; then
+            echo "create_tag=$(echo 'false' )" >> $GITHUB_OUTPUT
           else
-            echo "is-prerelease=false" >> $GITHUB_OUTPUT
-            echo "This is a stable release version"
+            echo "create_tag=$(echo 'true' )" >> $GITHUB_OUTPUT
           fi
-          
-      - name: Set up Go
-        uses: actions/setup-go@v4
+          echo "TAG=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+
+      - name: Create tag
+        if: steps.check-tag.outputs.create_tag == 'true'
+        uses: actions/github-script@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Download dependencies
-        run: go mod download && go mod verify
-
-      - name: Verify build for all platforms
-        run: |
-          echo "Building for all target platforms..."
-          make build-all VERSION=${{ steps.get-version.outputs.version }}
-
-  prepare-release:
-    name: Prepare Release
-    runs-on: ubuntu-latest
-    needs: pre-release-validation
-    outputs:
-      version: ${{ needs.pre-release-validation.outputs.version }}
-      upload_url: ${{ steps.create-release.outputs.upload_url }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get version
-        id: get-version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.tag }}"
-          else
-            VERSION=${GITHUB_REF#refs/tags/}
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Prepare krew release
-        run: |
-          ./hack/prepare-krew-release.sh ${{ steps.get-version.outputs.version }}
-
-      - name: Upload krew manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: krew-manifest
-          path: krew/kaito-${{ steps.get-version.outputs.version }}.yaml
-
-      - name: Upload release archives
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-archives
-          path: dist/archives/
+          script: |
+            github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: 'refs/tags/${{ github.event.inputs.tag }}',
+              sha: context.sha
+            })
 
   goreleaser:
-    name: GoReleaser
+    name: GoReleaser and Krew Release
     runs-on: ubuntu-latest
-    needs: prepare-release
-    outputs:
-      upload_url: ${{ steps.create-release.outputs.upload_url }}
+    needs: [pre-release-validation]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout the repository at the release branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          submodules: true
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag }}
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -156,144 +79,10 @@ jobs:
 
       - name: Run GoReleaser
         id: goreleaser
-        uses: goreleaser/goreleaser-action@v5
+        uses: goreleaser/goreleaser-action@9c156ee8a17a598857849441385a2041ef570552 # v6.3.0
         with:
-          distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean --verbose
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get release upload URL
-        id: create-release
-        run: |
-          # Get the upload URL from the release created by GoReleaser
-          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/tags/${{ needs.prepare-release.outputs.version }} --jq '.id')
-          UPLOAD_URL=$(gh api repos/${{ github.repository }}/releases/${RELEASE_ID} --jq '.upload_url')
-          echo "upload_url=${UPLOAD_URL}" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-krew-manifest:
-    name: Upload Krew Manifest
-    runs-on: ubuntu-latest
-    needs: [prepare-release, goreleaser]
-    steps:
-      - name: Download krew manifest
-        uses: actions/download-artifact@v4
-        with:
-          name: krew-manifest
-
-      - name: Upload krew manifest to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare-release.outputs.version }}
-          files: kaito-${{ needs.prepare-release.outputs.version }}.yaml
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-  test-krew-install:
-    name: Test Krew Installation
-    runs-on: ubuntu-latest
-    needs: [prepare-release, goreleaser, upload-krew-manifest]
-    steps:
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
-
-      - name: Install krew
-        run: |
-          set -x; cd "$(mktemp -d)" &&
-          OS="$(uname | tr '[:upper:]' '[:lower:]')" &&
-          ARCH="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/\(arm\)\(64\)\?.*/\1\2/' -e 's/aarch64$/arm64/')" &&
-          KREW="krew-${OS}_${ARCH}" &&
-          curl -fsSLO "https://github.com/kubernetes-sigs/krew/releases/latest/download/${KREW}.tar.gz" &&
-          tar zxvf "${KREW}.tar.gz" &&
-          ./"${KREW}" install krew
-
-      - name: Add krew to PATH
-        run: echo "$HOME/.krew/bin" >> $GITHUB_PATH
-
-      - name: Download krew manifest
-        uses: actions/download-artifact@v4
-        with:
-          name: krew-manifest
-
-      - name: Test krew installation
-        run: |
-          # Test installation with the generated manifest
-          kubectl krew install --manifest=kaito-${{ needs.prepare-release.outputs.version }}.yaml
-          
-          # Test basic functionality
-          kubectl kaito --help
-          kubectl kaito models list --help
-          kubectl kaito deploy --help
-          
-          # Test command structure
-          kubectl kaito models list || true  # May fail due to network, but should show help
-          
-          echo "Krew installation test passed"
-
-      - name: Cleanup
-        run: |
-          kubectl krew uninstall kaito || true
-
-  create-pr-for-krew-index:
-    name: Create PR for Krew Index
-    runs-on: ubuntu-latest
-    needs: [prepare-release, test-krew-install]
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Download krew manifest
-        uses: actions/download-artifact@v4
-        with:
-          name: krew-manifest
-
-      - name: Create PR instructions
-        run: |
-          cat > pr-instructions.md << EOF
-          # Krew Index Submission for kubectl-kaito ${{ needs.prepare-release.outputs.version }}
-          
-          ## Manual Steps Required
-          
-          1. **Fork the krew-index repository**:
-             \`\`\`bash
-             gh repo fork kubernetes-sigs/krew-index
-             \`\`\`
-          
-          2. **Clone your fork**:
-             \`\`\`bash
-             git clone https://github.com/YOUR_USERNAME/krew-index.git
-             cd krew-index
-             \`\`\`
-          
-          3. **Copy the manifest**:
-             \`\`\`bash
-             cp kaito-${{ needs.prepare-release.outputs.version }}.yaml plugins/kaito.yaml
-             \`\`\`
-          
-          4. **Create a commit and PR**:
-             \`\`\`bash
-             git add plugins/kaito.yaml
-             git commit -m "Add kubectl-kaito plugin ${{ needs.prepare-release.outputs.version }}"
-             git push origin main
-             gh pr create --title "Add kubectl-kaito plugin ${{ needs.prepare-release.outputs.version }}" --body "Add kubectl-kaito plugin for managing AI/ML workloads with Kaito operator."
-             \`\`\`
-          
-          ## Manifest Content
-          The krew manifest has been validated and is ready for submission.
-          
-          ## Release Information
-          - **Version**: ${{ needs.prepare-release.outputs.version }}
-          - **Release URL**: https://github.com/kaito-project/kubectl-kaito/releases/tag/${{ needs.prepare-release.outputs.version }}
-          - **Repository**: https://github.com/kaito-project/kubectl-kaito
-          
-          EOF
-          
-          echo "::notice::Krew index submission instructions created. Check pr-instructions.md in the artifacts."
-
-      - name: Upload PR instructions
-        uses: actions/upload-artifact@v4
-        with:
-          name: krew-pr-instructions
-          path: pr-instructions.md
+          GORELEASER_CURRENT_TAG: ${{ github.event.inputs.tag }}
