@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kaito-project/kubectl-kaito/pkg"
+	cmd "github.com/kaito-project/kubectl-kaito/pkg"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 
 	// Import auth plugins
