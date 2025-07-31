@@ -122,3 +122,74 @@ func TestSortModels(t *testing.T) {
 		assert.Equal(t, "zebra", models[1].Name)
 	})
 }
+
+func TestExtractModelFamily(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Falcon model",
+			input:    "falcon-7b",
+			expected: "Falcon",
+		},
+		{
+			name:     "Falcon instruct model",
+			input:    "falcon-7b-instruct",
+			expected: "Falcon",
+		},
+		{
+			name:     "Llama model",
+			input:    "llama-3.1-8b-instruct",
+			expected: "Llama",
+		},
+		{
+			name:     "Phi model",
+			input:    "phi-3.5-mini-instruct",
+			expected: "Phi",
+		},
+		{
+			name:     "Phi simple model",
+			input:    "phi-2",
+			expected: "Phi",
+		},
+		{
+			name:     "Mistral model",
+			input:    "mistral-7b-instruct",
+			expected: "Mistral",
+		},
+		{
+			name:     "DeepSeek model",
+			input:    "deepseek-r1-distill-llama-8b",
+			expected: "DeepSeek",
+		},
+		{
+			name:     "DeepSeek Qwen model",
+			input:    "deepseek-r1-distill-qwen-14b",
+			expected: "DeepSeek",
+		},
+		{
+			name:     "Qwen2.5 coder model",
+			input:    "qwen2.5-coder-7b-instruct",
+			expected: "Qwen2.5",
+		},
+		{
+			name:     "Single word model",
+			input:    "alpaca",
+			expected: "Alpaca",
+		},
+		{
+			name:     "Empty model name",
+			input:    "",
+			expected: "Unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractModelFamily(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

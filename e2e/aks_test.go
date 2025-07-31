@@ -60,9 +60,10 @@ func TestAKSClusterOperations(t *testing.T) {
 		testModelsDescribe(t)
 	})
 
-	t.Run("rag_deploy_dry_run", func(t *testing.T) {
-		testRAGDeployDryRun(t)
-	})
+	// TODO: Uncomment when RAG command is available
+	// t.Run("rag_deploy_dry_run", func(t *testing.T) {
+	// 	testRAGDeployDryRun(t)
+	// })
 
 	t.Run("chat_validation", func(t *testing.T) {
 		testChatValidation(t)

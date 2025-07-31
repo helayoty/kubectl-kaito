@@ -12,6 +12,19 @@ PKG = github.com/kaito-project/kubectl-kaito
 CMD_PKG = ./cmd/kubectl-kaito
 LDFLAGS = -ldflags "-X ${PKG}/pkg/cmd.version=${VERSION} -X ${PKG}/pkg/cmd.commit=${COMMIT} -X ${PKG}/pkg/cmd.date=${DATE}"
 
+# Scripts
+GO_INSTALL := ./hack/go-install.sh
+TOOLS_DIR := hack/tools
+TOOLS_BIN_DIR := $(abspath $(TOOLS_DIR)/bin)
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
+
+
 GOLANGCI_LINT_VER := latest
 GOLANGCI_LINT_BIN := golangci-lint
 GOLANGCI_LINT := $(abspath $(TOOLS_BIN_DIR)/$(GOLANGCI_LINT_BIN)-$(GOLANGCI_LINT_VER))

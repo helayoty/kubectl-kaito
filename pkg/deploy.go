@@ -32,38 +32,30 @@ import (
 
 // DeployOptions holds the options for the deploy command
 type DeployOptions struct {
-	configFlags *genericclioptions.ConfigFlags
-
-	// Common fields
-	WorkspaceName string
-	Namespace     string
-	Model         string
-	InstanceType  string
-	Count         int
-	DryRun        bool
-
-	// Inference specific
-	ModelAccessSecret string
-	Adapters          []string
-	InferenceConfig   string
-	PreferredNodes    []string
-	LabelSelector     map[string]string
-
-	// Special options
+	configFlags          *genericclioptions.ConfigFlags
+	Adapters             []string
+	InputURLs            []string
+	PreferredNodes       []string
+	LabelSelector        map[string]string
+	WorkspaceName        string
+	Namespace            string
+	Model                string
+	InstanceType         string
+	ModelAccessSecret    string
+	InferenceConfig      string
+	TuningMethod         string
+	OutputImage          string
+	OutputImageSecret    string
+	TuningConfig         string
+	InputPVC             string
+	OutputPVC            string
+	ModelAccessMode      string
+	ModelImage           string
+	Count                int
+	DryRun               bool
 	BypassResourceChecks bool
 	EnableLoadBalancer   bool
-
-	// Tuning specific
-	Tuning            bool
-	TuningMethod      string
-	InputURLs         []string
-	OutputImage       string
-	OutputImageSecret string
-	TuningConfig      string
-	InputPVC          string
-	OutputPVC         string
-	ModelAccessMode   string
-	ModelImage        string
+	Tuning               bool
 }
 
 // NewDeployCmd creates the deploy command

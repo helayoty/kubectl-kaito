@@ -4,7 +4,15 @@ Get the inference endpoint URL for a deployed Kaito workspace.
 
 ## Synopsis
 
-Get the inference endpoint URL for a deployed Kaito workspace. This command retrieves the service endpoint that can be used to send inference requests to the deployed model. The endpoint supports OpenAI-compatible APIs.
+Get the inference endpoint URL for a deployed Kaito workspace. This command retrieves all available service endpoints that can be used to send inference requests to the deployed model. The endpoints support OpenAI-compatible APIs.
+
+The command automatically discovers all accessible endpoints:
+
+- **LoadBalancer**: Direct public access (if configured)
+- **API Proxy**: Kubernetes API proxy (works anywhere kubectl works)  
+- **Cluster-internal**: Direct cluster access (for pods only)
+
+The URL format returns the best available endpoint (prefers external if available), while JSON format shows all discovered endpoints with detailed information.
 
 ## Usage
 
@@ -19,7 +27,6 @@ kaito get-endpoint [flags]
 | `--workspace-name string` | string |         | Name of the workspace (required)             |
 | `-n, --namespace string`  | string |         | Kubernetes namespace                         |
 | `--format string`         | string | url     | Output format: url or json                   |
-| `--external`              | bool   | false   | Get external endpoint (LoadBalancer/Ingress) |
 
 ## Examples
 
@@ -30,41 +37,57 @@ kaito get-endpoint [flags]
 kubectl kaito get-endpoint --workspace-name my-workspace
 ```
 
-Output:
+Output (from outside cluster):
+
 ```
-http://my-workspace.default.svc.cluster.local/chat/completions
+https://your-api-server.com/api/v1/namespaces/default/services/my-workspace:80/proxy
 ```
 
-### JSON Format Output
+### JSON Format Output - All Endpoints
 
 ```bash
-# Get endpoint in JSON format with metadata
+# Get all available endpoints in JSON format
 kubectl kaito get-endpoint --workspace-name my-workspace --format json
 ```
 
-Output:
+Output (showing all available endpoints):
+
 ```json
 {
   "workspace": "my-workspace",
   "namespace": "default",
-  "endpoint": "http://my-workspace.default.svc.cluster.local/chat/completions",
-  "type": "ClusterIP",
-  "port": 80,
-  "ready": true,
-  "model": "llama-2-7b"
+  "endpoints": [
+    {
+      "url": "https://your-api-server.com/api/v1/namespaces/default/services/my-workspace:80/proxy",
+      "type": "APIProxy",
+      "access": "cluster",
+      "description": "Kubernetes API proxy (works anywhere kubectl works)"
+    }
+  ]
 }
 ```
 
-### External Endpoint
+With LoadBalancer (if configured):
 
-```bash
-# Get external endpoint if available (LoadBalancer/Ingress)
-kubectl kaito get-endpoint --workspace-name my-workspace --external
-```
-
-Output (when LoadBalancer is available):
-```
-http://20.123.45.67/chat/completions
+```json
+{
+  "workspace": "my-workspace", 
+  "namespace": "default",
+  "endpoints": [
+    {
+      "url": "http://203.0.113.42:80",
+      "type": "LoadBalancer",
+      "access": "external",
+      "description": "Direct public access via LoadBalancer"
+    },
+    {
+      "url": "https://your-api-server.com/api/v1/namespaces/default/services/my-workspace:80/proxy",
+      "type": "APIProxy", 
+      "access": "cluster",
+      "description": "Kubernetes API proxy (works anywhere kubectl works)"
+    }
+  ]
+}
 ```
 
 ### Cross-Namespace Access
@@ -80,7 +103,7 @@ kubectl kaito get-endpoint \
 
 ### URL Format (default)
 
-Returns just the endpoint URL, suitable for scripting:
+Returns the best available endpoint URL, suitable for scripting. Prefers external endpoints if available:
 
 ```bash
 ENDPOINT=$(kubectl kaito get-endpoint --workspace-name my-workspace)
@@ -91,35 +114,48 @@ curl -X POST "$ENDPOINT" -H "Content-Type: application/json" -d '{
 
 ### JSON Format
 
-Returns detailed information about the endpoint:
+Returns all available endpoints with detailed information:
 
 ```json
 {
   "workspace": "my-workspace",
-  "namespace": "default", 
-  "endpoint": "http://my-workspace.default.svc.cluster.local/chat/completions",
-  "type": "ClusterIP",
-  "port": 80,
-  "ready": true,
-  "model": "llama-2-7b",
-  "external_endpoint": "http://20.123.45.67/chat/completions"
+  "namespace": "default",
+  "endpoints": [
+    {
+      "url": "https://your-api-server.com/api/v1/namespaces/default/services/my-workspace:80/proxy",
+      "type": "APIProxy",
+      "access": "cluster", 
+      "description": "Kubernetes API proxy (works anywhere kubectl works)"
+    }
+  ]
 }
 ```
 
 ## Endpoint Types
 
-### Internal Endpoints (default)
+The command automatically discovers and returns all available endpoint types:
 
-- **ClusterIP**: `http://<workspace>.<namespace>.svc.cluster.local/chat/completions`
-- Accessible only from within the Kubernetes cluster
-- Default service type for security
+### API Proxy (cluster access)
 
-### External Endpoints (--external flag)
+- **Format**: `https://<api-server>/api/v1/namespaces/<namespace>/services/<workspace>:80/proxy`
+- **Authentication**: Uses your kubectl credentials
+- **Access**: Works anywhere kubectl works (local machine, CI/CD, etc.)
+- **Security**: Authenticated via Kubernetes RBAC
 
-- **LoadBalancer**: `http://<external-ip>/chat/completions`
-- **NodePort**: `http://<node-ip>:<port>/chat/completions`
-- **Ingress**: `http://<ingress-host>/chat/completions`
-- Accessible from outside the cluster
+### LoadBalancer (external access)
+
+- **Format**: `http://<external-ip>:80`
+- **Authentication**: None (direct access)
+- **Access**: Public internet access
+- **Security**: Unprotected (configure firewall rules as needed)
+- **Availability**: Only if service type is LoadBalancer
+
+### Cluster-Internal (pod access)
+
+- **Format**: `http://<workspace>.<namespace>.svc.cluster.local:80`
+- **Authentication**: None (direct access)
+- **Access**: Only from within the Kubernetes cluster
+- **Security**: Protected by cluster network policies
 
 ## API Compatibility
 

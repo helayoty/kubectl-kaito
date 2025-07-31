@@ -6,6 +6,12 @@ Start an interactive chat session with a deployed Kaito workspace model.
 
 Start an interactive chat session with a deployed Kaito workspace model. This command provides a chat interface to interact with deployed models using OpenAI-compatible APIs in interactive mode.
 
+The command automatically handles endpoint detection and authentication:
+- **LoadBalancer services**: Uses direct external access (if available)
+- **ClusterIP services**: Uses Kubernetes API proxy (works anywhere kubectl works)  
+- **Inside cluster**: Connects directly to cluster-internal service
+- **No manual setup required**: No port-forwarding or additional configuration needed
+
 ## Usage
 
 ```bash

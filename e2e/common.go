@@ -73,7 +73,7 @@ func buildBinary() error {
 	fmt.Printf("Building binary at: %s\n", binaryPath)
 
 	// Check if binary already exists
-	if _, err := os.Stat(binaryPath); err == nil {
+	if _, err2 := os.Stat(binaryPath); err2 == nil {
 		fmt.Printf("Binary already exists at: %s\n", binaryPath)
 		return nil
 	}
@@ -348,7 +348,8 @@ func testHelpCommands(t *testing.T) {
 		{"status help", []string{"status", "--help"}},
 		{"get-endpoint help", []string{"get-endpoint", "--help"}},
 		{"chat help", []string{"chat", "--help"}},
-		{"rag help", []string{"rag", "--help"}},
+		// TODO: Uncomment when RAG command is available
+		// {"rag help", []string{"rag", "--help"}},
 	}
 
 	for _, tt := range tests {

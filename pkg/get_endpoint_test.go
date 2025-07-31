@@ -44,7 +44,7 @@ func TestGetEndpointCmd(t *testing.T) {
 		formatFlag := flags.Lookup("format")
 		assert.NotNil(t, formatFlag)
 
-		externalFlag := flags.Lookup("external")
-		assert.NotNil(t, externalFlag)
+		namespaceFlag := flags.Lookup("namespace")
+		assert.NotNil(t, namespaceFlag)
 	})
 }

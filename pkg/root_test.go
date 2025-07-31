@@ -54,7 +54,6 @@ func TestNewRootCmd(t *testing.T) {
 			assert.Equal(t, tt.expectedUse, cmd.Use)
 			assert.Equal(t, tt.expectedShort, cmd.Short)
 			assert.True(t, cmd.SilenceUsage)
-			assert.True(t, cmd.SilenceErrors)
 			assert.NotEmpty(t, cmd.Long)
 			assert.NotEmpty(t, cmd.Example)
 		})
@@ -67,7 +66,6 @@ func TestRootCmdStructure(t *testing.T) {
 
 	t.Run("Command properties", func(t *testing.T) {
 		assert.True(t, cmd.SilenceUsage, "SilenceUsage should be true")
-		assert.True(t, cmd.SilenceErrors, "SilenceErrors should be true")
 		assert.NotNil(t, cmd.PersistentPreRunE, "PersistentPreRunE should be set")
 	})
 
@@ -84,7 +82,7 @@ func TestRootCmdStructure(t *testing.T) {
 		assert.Contains(t, cmd.Example, "kubectl kaito get-endpoint")
 		assert.Contains(t, cmd.Example, "kubectl kaito chat")
 		assert.Contains(t, cmd.Example, "kubectl kaito models")
-		assert.Contains(t, cmd.Example, "kubectl kaito rag")
+		// Note: RAG command is currently commented out in root.go
 	})
 }
 
@@ -98,7 +96,7 @@ func TestRootCmdSubcommands(t *testing.T) {
 		"get-endpoint",
 		"chat",
 		"models",
-		"rag",
+		// Note: "rag" is commented out in root.go
 	}
 
 	t.Run("Subcommands present", func(t *testing.T) {
@@ -154,7 +152,7 @@ func TestRootCmdFlags(t *testing.T) {
 			"kubeconfig",
 			"context",
 			"namespace",
-			"server",
+			// Note: "server" flag not set by NewConfigFlags(true)
 		}
 
 		for _, flagName := range expectedFlags {

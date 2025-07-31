@@ -37,6 +37,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
 
@@ -138,21 +139,18 @@ func (o *ChatOptions) run() error {
 	// Get REST config
 	config, err := o.configFlags.ToRESTConfig()
 	if err != nil {
-		klog.Errorf("Failed to get REST config: %v", err)
 		return fmt.Errorf("failed to get REST config: %w", err)
 	}
 
 	// Create clients
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		klog.Errorf("Failed to create kubernetes client: %v", err)
 		return fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
 	// Get the endpoint URL
 	endpoint, err := o.getInferenceEndpoint(context.TODO(), clientset)
 	if err != nil {
-		klog.Errorf("Failed to get inference endpoint: %v", err)
 		return err
 	}
 
@@ -175,8 +173,7 @@ func (o *ChatOptions) getInferenceEndpoint(ctx context.Context, clientset kubern
 	// Get the service for the workspace (service name equals workspace name)
 	svc, err := clientset.CoreV1().Services(o.Namespace).Get(ctx, o.WorkspaceName, metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("Failed to get service for workspace %s: %v", o.WorkspaceName, err)
-		return "", fmt.Errorf("failed to get service for workspace %s: %v", o.WorkspaceName, err)
+		return "", fmt.Errorf("failed to get service for workspace %s: %w", o.WorkspaceName, err)
 	}
 
 	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == "None" {
@@ -185,20 +182,19 @@ func (o *ChatOptions) getInferenceEndpoint(ctx context.Context, clientset kubern
 
 	var baseEndpoint string
 
-	// Try cluster-internal endpoint first
+	// Try cluster-internal endpoint first (if running inside cluster)
 	clusterEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
 	if o.canAccessClusterEndpoint(clusterEndpoint) {
 		baseEndpoint = clusterEndpoint
 		klog.V(3).Infof("Using cluster-internal endpoint: %s", baseEndpoint)
 	} else {
-		// Check for local port-forward
-		localEndpoint := o.checkLocalPortForward()
-		if localEndpoint != "" {
-			baseEndpoint = localEndpoint
-			klog.V(3).Infof("Using local port-forward endpoint: %s", baseEndpoint)
-		} else {
-			return "", fmt.Errorf("workspace endpoint is not accessible.\n\nTo chat with this workspace, first set up port-forwarding:\n  kubectl port-forward svc/%s 8080:80\n\nThen try the chat command again (it will automatically detect the local endpoint)", o.WorkspaceName)
+		// Use Kubernetes API Proxy - works from anywhere kubectl works!
+		apiProxyEndpoint, err := o.getAPIProxyEndpoint(clientset)
+		if err != nil {
+			return "", fmt.Errorf("failed to get API proxy endpoint: %w", err)
 		}
+		baseEndpoint = apiProxyEndpoint
+		klog.V(3).Infof("Using Kubernetes API proxy endpoint: %s", baseEndpoint)
 	}
 
 	// Return OpenAI-compatible chat endpoint
@@ -212,35 +208,6 @@ func (o *ChatOptions) canAccessClusterEndpoint(endpoint string) bool {
 	// Try to resolve the cluster DNS name
 	_, err := net.LookupHost(strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://"))
 	return err == nil
-}
-
-// checkLocalPortForward checks for common local port-forward endpoints
-func (o *ChatOptions) checkLocalPortForward() string {
-	commonPorts := []string{"8080", "8000", "3000", "5000"}
-
-	for _, port := range commonPorts {
-		endpoint := fmt.Sprintf("http://localhost:%s", port)
-		if o.testEndpoint(endpoint) {
-			return endpoint
-		}
-	}
-
-	return ""
-}
-
-// testEndpoint tests if an endpoint is accessible
-func (o *ChatOptions) testEndpoint(endpoint string) bool {
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	// Try a simple HEAD request to the base endpoint
-	resp, err := client.Head(endpoint)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	// Consider any response as success (including 404, since the service might not have a root endpoint)
-	return resp.StatusCode < 500
 }
 
 func (o *ChatOptions) getModelName(config interface{}) (string, error) {
@@ -509,7 +476,22 @@ func (o *ChatOptions) setParameter(param, value string) {
 func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {
 	klog.V(4).Infof("Sending message to endpoint: %s", endpoint)
 
-	// Prepare request payload
+	payload := o.buildRequestPayload(message)
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		klog.Errorf("Failed to marshal request: %v", err)
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	response, err := o.makeHTTPRequest(endpoint, jsonData)
+	if err != nil {
+		return "", err
+	}
+
+	return o.extractMessageContent(response)
+}
+
+func (o *ChatOptions) buildRequestPayload(message string) map[string]interface{} {
 	payload := map[string]interface{}{
 		"messages": []map[string]string{
 			{
@@ -532,52 +514,120 @@ func (o *ChatOptions) sendMessage(endpoint, message string) (string, error) {
 		payload["messages"] = append([]map[string]string{systemMessage}, messages...)
 	}
 
-	jsonData, err := json.Marshal(payload)
+	return payload
+}
+
+func (o *ChatOptions) makeHTTPRequest(endpoint string, jsonData []byte) (map[string]interface{}, error) {
+	client, err := o.createHTTPClient(endpoint)
 	if err != nil {
-		klog.Errorf("Failed to marshal request: %v", err)
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
-	// Make HTTP request
-	url := endpoint
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	resp, err := client.Post(endpoint, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		klog.Errorf("Failed to send request: %v", err)
-		return "", fmt.Errorf("failed to send request: %w", err)
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Read response
 	body, err := io.ReadAll(resp.Body)
 	if err == nil && resp.StatusCode != http.StatusOK {
 		klog.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	if err != nil {
 		klog.Errorf("Failed to read response: %v", err)
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Parse response
 	var response map[string]interface{}
 	if err := json.Unmarshal(body, &response); err != nil {
 		klog.Errorf("Failed to parse response: %v", err)
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	// Extract message content
-	if choices, ok := response["choices"].([]interface{}); ok && len(choices) > 0 {
-		if choice, ok := choices[0].(map[string]interface{}); ok {
-			if message, ok := choice["message"].(map[string]interface{}); ok {
-				if content, ok := message["content"].(string); ok {
-					return strings.TrimSpace(content), nil
-				}
-			}
+	return response, nil
+}
+
+// createHTTPClient creates an HTTP client with proper authentication for API proxy endpoints
+func (o *ChatOptions) createHTTPClient(endpoint string) (*http.Client, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// If this is an API proxy endpoint, we need to add authentication
+	if strings.Contains(endpoint, "/api/v1/namespaces/") {
+		config, err := o.configFlags.ToRESTConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get REST config: %w", err)
 		}
+
+		// Set up the transport with authentication
+		transport, err := o.createAuthenticatedTransport(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create authenticated transport: %w", err)
+		}
+		client.Transport = transport
 	}
 
-	klog.Error("Unexpected response format")
-	return "", fmt.Errorf("unexpected response format")
+	return client, nil
+}
+
+// createAuthenticatedTransport creates an HTTP transport with Kubernetes authentication
+func (o *ChatOptions) createAuthenticatedTransport(config *rest.Config) (http.RoundTripper, error) {
+	// Use the existing REST config's transport
+	transport, err := rest.TransportFor(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transport: %w", err)
+	}
+	return transport, nil
+}
+
+func (o *ChatOptions) extractMessageContent(response map[string]interface{}) (string, error) {
+	choices, ok := response["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		klog.Error("Unexpected response format: no choices")
+		return "", fmt.Errorf("unexpected response format: no choices")
+	}
+
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		klog.Error("Unexpected response format: invalid choice")
+		return "", fmt.Errorf("unexpected response format: invalid choice")
+	}
+
+	message, ok := choice["message"].(map[string]interface{})
+	if !ok {
+		klog.Error("Unexpected response format: no message")
+		return "", fmt.Errorf("unexpected response format: no message")
+	}
+
+	content, ok := message["content"].(string)
+	if !ok {
+		klog.Error("Unexpected response format: no content")
+		return "", fmt.Errorf("unexpected response format: no content")
+	}
+
+	return strings.TrimSpace(content), nil
+}
+
+// getAPIProxyEndpoint constructs the Kubernetes API proxy endpoint for the service
+func (o *ChatOptions) getAPIProxyEndpoint(clientset kubernetes.Interface) (string, error) {
+	// Get the REST config to build the API server URL
+	config, err := o.configFlags.ToRESTConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to get REST config: %w", err)
+	}
+
+	// Build the API proxy URL
+	// Format: https://{api-server}/api/v1/namespaces/{namespace}/services/{service-name}:{port}/proxy
+	namespace := o.Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	apiProxyURL := fmt.Sprintf("%s/api/v1/namespaces/%s/services/%s:80/proxy",
+		strings.TrimSuffix(config.Host, "/"), namespace, o.WorkspaceName)
+
+	klog.V(3).Infof("Constructed API proxy URL: %s", apiProxyURL)
+	return apiProxyURL, nil
 }

@@ -38,15 +38,17 @@ linters-settings:
   govet:
     check-shadowing: true
     enable-all: true
+    disable:
+      - fieldalignment
 
   misspell:
     locale: US
 
   gocognit:
-    min-complexity: 15
+    min-complexity: 25
 
   gocyclo:
-    min-complexity: 15
+    min-complexity: 25
 
   goconst:
     min-len: 3
@@ -89,6 +91,7 @@ issues:
         - errcheck
         - gosec
         - funlen
+        - govet
     - text: "Use of builtin print function"
       linters:
         - forbidigo

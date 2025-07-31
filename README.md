@@ -10,16 +10,18 @@ kubectl-kaito simplifies AI model deployment on Kubernetes by providing an intui
 
 ## Features
 
-- **One-command deployment** of AI models with automatic GPU provisioning
-- **Interactive chat** interface for deployed models
-- **Fine-tuning** support with QLoRA and LoRA methods
-- **Real-time monitoring** of workspace status and conditions
-- **OpenAI-compatible APIs** for seamless integration
-- **Model discovery** with comprehensive model catalog
+- **One-command deployment** Deploy AI models with a single command that automatically provisions GPU nodes and configures the inference stack
+- **Real-time monitoring** Monitor workspace deployment status with real-time conditions, NodeClaim tracking, and detailed health checks
+- **OpenAI-compatible APIs** Interact with deployed models through an OpenAI-compatible chat interface with customizable system prompts
+- **Model discovery** Browse and discover Kaito pre-configured AI models with detailed specifications and GPU requirements
+- **Seamless endpoint access** Access inference endpoints automatically using Kubernetes API proxy - works anywhere kubectl works without manual setup
 
 ## Quick Start
 
 ```bash
+# List available models
+kubectl kaito models list
+
 # Deploy a model for inference
 kubectl kaito deploy --workspace-name my-workspace --model llama-2-7b
 
@@ -31,9 +33,6 @@ kubectl kaito get-endpoint --workspace-name my-workspace
 
 # Start interactive chat
 kubectl kaito chat --workspace-name my-workspace
-
-# List available models
-kubectl kaito models list
 ```
 
 ## Installation

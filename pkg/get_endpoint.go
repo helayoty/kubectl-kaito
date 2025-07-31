@@ -21,11 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -34,13 +33,19 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// EndpointInfo represents an available endpoint
+type EndpointInfo struct {
+	URL         string `json:"url"`
+	Type        string `json:"type"`
+	Access      string `json:"access"`
+	Description string `json:"description"`
+}
+
 // GetEndpointOptions holds the options for the get-endpoint command
 type GetEndpointOptions struct {
-	configFlags *genericclioptions.ConfigFlags
-
+	configFlags   *genericclioptions.ConfigFlags
 	WorkspaceName string
 	Namespace     string
-	External      bool
 	Format        string
 }
 
@@ -63,8 +68,8 @@ requests to the deployed model. The endpoint supports OpenAI-compatible APIs.`,
   # Get endpoint in JSON format with metadata
   kubectl kaito get-endpoint --workspace-name my-workspace --format json
 
-  # Get external endpoint if available (LoadBalancer/Ingress)
-  kubectl kaito get-endpoint --workspace-name my-workspace --external`,
+  # Get all available endpoints
+  kubectl kaito get-endpoint --workspace-name my-workspace --format json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.validate(); err != nil {
 				return err
@@ -75,7 +80,6 @@ requests to the deployed model. The endpoint supports OpenAI-compatible APIs.`,
 
 	cmd.Flags().StringVar(&o.WorkspaceName, "workspace-name", "", "Name of the workspace (required)")
 	cmd.Flags().StringVarP(&o.Namespace, "namespace", "n", "", "Kubernetes namespace")
-	cmd.Flags().BoolVar(&o.External, "external", false, "Get external endpoint (LoadBalancer/Ingress)")
 	cmd.Flags().StringVar(&o.Format, "format", "url", "Output format: url or json")
 
 	if err := cmd.MarkFlagRequired("workspace-name"); err != nil {
@@ -115,34 +119,30 @@ func (o *GetEndpointOptions) run() error {
 	// Get REST config
 	config, err := o.configFlags.ToRESTConfig()
 	if err != nil {
-		klog.Errorf("Failed to get REST config: %v", err)
 		return fmt.Errorf("failed to get REST config: %w", err)
 	}
 
 	// Create dynamic client
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		klog.Errorf("Failed to create dynamic client: %v", err)
 		return fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
 	// Create kubernetes client
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		klog.Errorf("Failed to create kubernetes client: %v", err)
 		return fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
 	// Check workspace status first
-	if err := o.checkWorkspaceReady(dynamicClient); err != nil {
+	if err2 := o.checkWorkspaceReady(dynamicClient); err2 != nil {
 		return err
 	}
 
-	// Get the endpoint
-	endpoint, err := o.getServiceEndpoint(context.TODO(), clientset)
+	// Get all available endpoints
+	endpoints, err := o.getAllEndpoints(context.TODO(), clientset)
 	if err != nil {
-		klog.Errorf("Failed to get service endpoint: %v", err)
-		return fmt.Errorf("failed to get service endpoint: %w", err)
+		return err
 	}
 
 	// Output the result
@@ -150,13 +150,7 @@ func (o *GetEndpointOptions) run() error {
 		output := map[string]interface{}{
 			"workspace": o.WorkspaceName,
 			"namespace": o.Namespace,
-			"endpoint":  endpoint,
-			"type":      "inference",
-		}
-		if o.External {
-			output["access"] = "external"
-		} else {
-			output["access"] = "cluster"
+			"endpoints": endpoints,
 		}
 
 		jsonOutput, err := json.MarshalIndent(output, "", "  ")
@@ -166,7 +160,20 @@ func (o *GetEndpointOptions) run() error {
 		}
 		fmt.Println(string(jsonOutput))
 	} else {
-		fmt.Println(endpoint)
+		// For URL format, show the best endpoint (prefer external if available)
+		if len(endpoints) == 0 {
+			return fmt.Errorf("no endpoints available for workspace %s", o.WorkspaceName)
+		}
+
+		// Prefer external endpoints, fallback to first available
+		for _, ep := range endpoints {
+			if ep.Access == "external" {
+				fmt.Println(ep.URL)
+				return nil
+			}
+		}
+		// No external endpoint, use the first one
+		fmt.Println(endpoints[0].URL)
 	}
 
 	return nil
@@ -261,57 +268,110 @@ func (o *GetEndpointOptions) isWorkspaceReady(status interface{}) bool {
 	return resourceReady && inferenceReady
 }
 
-func (o *GetEndpointOptions) getServiceEndpoint(ctx context.Context, clientset kubernetes.Interface) (string, error) {
-	klog.V(3).Infof("Getting service endpoint for workspace: %s", o.WorkspaceName)
+func (o *GetEndpointOptions) getAllEndpoints(ctx context.Context, clientset kubernetes.Interface) ([]EndpointInfo, error) {
+	klog.V(3).Infof("Getting all endpoints for workspace: %s", o.WorkspaceName)
 
-	// Get the service for the workspace (service name equals workspace name)
 	svc, err := clientset.CoreV1().Services(o.Namespace).Get(ctx, o.WorkspaceName, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("Failed to get service for workspace %s: %v", o.WorkspaceName, err)
-		return "", fmt.Errorf("failed to get service for workspace %s: %v", o.WorkspaceName, err)
+		return nil, fmt.Errorf("failed to get service for workspace %s: %v", o.WorkspaceName, err)
 	}
 
-	if o.External {
-		// Check for LoadBalancer endpoint
-		if svc.Spec.Type == "LoadBalancer" {
-			for _, ingress := range svc.Status.LoadBalancer.Ingress {
-				var endpoint string
-				if ingress.IP != "" {
-					endpoint = fmt.Sprintf("http://%s:80", ingress.IP)
-				} else if ingress.Hostname != "" {
-					endpoint = fmt.Sprintf("http://%s:80", ingress.Hostname)
-				}
-				if endpoint != "" {
-					klog.V(3).Infof("Found external LoadBalancer endpoint: %s", endpoint)
-					return endpoint, nil
-				}
-			}
-		}
-		// Could also check for Ingress resources here
+	var endpoints []EndpointInfo
+
+	// Check for LoadBalancer endpoint (external access)
+	if lbEndpoint := o.getLoadBalancerEndpoint(svc); lbEndpoint != "" {
+		endpoints = append(endpoints, EndpointInfo{
+			URL:         lbEndpoint,
+			Type:        "LoadBalancer",
+			Access:      "external",
+			Description: "Direct public access via LoadBalancer",
+		})
 	}
 
-	// Return cluster-internal service endpoint
-	if svc.Spec.ClusterIP != "" && svc.Spec.ClusterIP != "None" {
-		clusterEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
+	// Always add the API proxy endpoint (works anywhere kubectl works)
+	apiProxyEndpoint, err := o.getAPIProxyEndpoint()
+	if err != nil {
+		klog.V(3).Infof("Could not get API proxy endpoint: %v", err)
+	} else {
+		endpoints = append(endpoints, EndpointInfo{
+			URL:         apiProxyEndpoint,
+			Type:        "APIProxy",
+			Access:      "cluster",
+			Description: "Kubernetes API proxy (works anywhere kubectl works)",
+		})
+	}
 
-		// Check if we can access the cluster endpoint (are we running inside the cluster?)
+	// Add cluster-internal endpoint if accessible (for pods/internal use)
+	if clusterEndpoint := o.getClusterInternalEndpoint(svc); clusterEndpoint != "" {
 		if o.canAccessClusterEndpoint(clusterEndpoint) {
-			klog.V(3).Infof("Using cluster-internal endpoint: %s", clusterEndpoint)
-			return clusterEndpoint, nil
+			endpoints = append(endpoints, EndpointInfo{
+				URL:         clusterEndpoint,
+				Type:        "ClusterIP",
+				Access:      "internal",
+				Description: "Direct cluster-internal access (for pods)",
+			})
 		}
-
-		// If we can't access cluster endpoint, check for local port-forward
-		localEndpoint := o.checkLocalPortForward()
-		if localEndpoint != "" {
-			klog.V(3).Infof("Using local port-forward endpoint: %s", localEndpoint)
-			return localEndpoint, nil
-		}
-
-		// Provide helpful alternatives instead of just an error
-		return "", fmt.Errorf("workspace endpoint is only accessible from within the cluster.\n\nOptions to access the workspace:\n\n1. Use port-forward to expose the endpoint locally:\n   kubectl port-forward svc/%s 8080:80\n   Then use: http://localhost:8080\n\n2. Use the chat command directly (handles port-forward detection automatically):\n   kubectl kaito chat --workspace-name %s", o.WorkspaceName, o.WorkspaceName)
 	}
 
-	return "", fmt.Errorf("service %s has no cluster IP", o.WorkspaceName)
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("no accessible endpoints found for workspace %s", o.WorkspaceName)
+	}
+
+	return endpoints, nil
+}
+
+func (o *GetEndpointOptions) getLoadBalancerEndpoint(svc *corev1.Service) string {
+	if svc.Spec.Type != "LoadBalancer" {
+		return ""
+	}
+
+	for _, ingress := range svc.Status.LoadBalancer.Ingress {
+		var endpoint string
+		if ingress.IP != "" {
+			endpoint = fmt.Sprintf("http://%s:80", ingress.IP)
+		} else if ingress.Hostname != "" {
+			endpoint = fmt.Sprintf("http://%s:80", ingress.Hostname)
+		}
+		if endpoint != "" {
+			klog.V(3).Infof("Found external LoadBalancer endpoint: %s", endpoint)
+			return endpoint
+		}
+	}
+	return ""
+}
+
+func (o *GetEndpointOptions) getClusterInternalEndpoint(svc *corev1.Service) string {
+	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == "None" {
+		return ""
+	}
+
+	// Return cluster-internal endpoint (caller will check if accessible)
+	clusterEndpoint := fmt.Sprintf("http://%s.%s.svc.cluster.local:80", o.WorkspaceName, o.Namespace)
+	klog.V(3).Infof("Cluster-internal endpoint: %s", clusterEndpoint)
+	return clusterEndpoint
+}
+
+// getAPIProxyEndpoint constructs the Kubernetes API proxy endpoint for the service
+func (o *GetEndpointOptions) getAPIProxyEndpoint() (string, error) {
+	// Get the REST config to build the API server URL
+	config, err := o.configFlags.ToRESTConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to get REST config: %w", err)
+	}
+
+	// Build the API proxy URL
+	// Format: https://{api-server}/api/v1/namespaces/{namespace}/services/{service-name}:{port}/proxy
+	namespace := o.Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	apiProxyURL := fmt.Sprintf("%s/api/v1/namespaces/%s/services/%s:80/proxy",
+		strings.TrimSuffix(config.Host, "/"), namespace, o.WorkspaceName)
+
+	klog.V(3).Infof("Constructed API proxy URL: %s", apiProxyURL)
+	return apiProxyURL, nil
 }
 
 // canAccessClusterEndpoint checks if we can reach the cluster-internal endpoint
@@ -319,33 +379,4 @@ func (o *GetEndpointOptions) canAccessClusterEndpoint(endpoint string) bool {
 	// Try to resolve the cluster DNS name
 	_, err := net.LookupHost(strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://"))
 	return err == nil
-}
-
-// checkLocalPortForward checks for common local port-forward endpoints
-func (o *GetEndpointOptions) checkLocalPortForward() string {
-	commonPorts := []string{"8080", "8000", "3000", "5000"}
-
-	for _, port := range commonPorts {
-		endpoint := fmt.Sprintf("http://localhost:%s", port)
-		if o.testEndpoint(endpoint) {
-			return endpoint
-		}
-	}
-
-	return ""
-}
-
-// testEndpoint tests if an endpoint is accessible
-func (o *GetEndpointOptions) testEndpoint(endpoint string) bool {
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	// Try a simple HEAD request to the base endpoint
-	resp, err := client.Head(endpoint)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	// Consider any response as success (including 404, since the service might not have a root endpoint)
-	return resp.StatusCode < 500
 }

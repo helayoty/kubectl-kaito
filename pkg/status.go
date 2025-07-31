@@ -360,62 +360,93 @@ func (o *StatusOptions) printDeploymentStatus(workspace *unstructured.Unstructur
 	fmt.Println("Deployment Status:")
 	fmt.Println("==================")
 
-	// Get status information
+	statusMap := o.getStatusMap(workspace)
+	if statusMap == nil {
+		return
+	}
+
+	o.printConditionStatuses(statusMap)
+	o.printWorkerNodesList(statusMap)
+
+	// Print detailed conditions
+	fmt.Println()
+	o.printConditions(workspace)
+}
+
+func (o *StatusOptions) getStatusMap(workspace *unstructured.Unstructured) map[string]interface{} {
 	status, found := workspace.Object["status"]
 	if !found {
 		fmt.Println("Status: Not Available")
-		return
+		return nil
 	}
 
 	statusMap, ok := status.(map[string]interface{})
 	if !ok {
 		fmt.Println("Status: Invalid Format")
+		return nil
+	}
+
+	return statusMap
+}
+
+func (o *StatusOptions) printConditionStatuses(statusMap map[string]interface{}) {
+	conditions, found := statusMap["conditions"]
+	if !found {
 		return
 	}
 
-	// Print condition statuses
-	if conditions, found := statusMap["conditions"]; found {
-		if condList, ok := conditions.([]interface{}); ok {
-			resourceReady := "Unknown"
-			inferenceReady := "Unknown"
-			workspaceReady := "Unknown"
-
-			for _, condition := range condList {
-				if condMap, ok := condition.(map[string]interface{}); ok {
-					condType, _ := condMap["type"].(string)
-					condStatus, _ := condMap["status"].(string)
-
-					switch condType {
-					case "ResourceReady":
-						resourceReady = condStatus
-					case "InferenceReady":
-						inferenceReady = condStatus
-					case "WorkspaceSucceeded":
-						workspaceReady = condStatus
-					}
-				}
-			}
-
-			fmt.Printf("Resource Ready: %s\n", resourceReady)
-			fmt.Printf("Inference Ready: %s\n", inferenceReady)
-			fmt.Printf("Workspace Ready: %s\n", workspaceReady)
-		}
+	condList, ok := conditions.([]interface{})
+	if !ok {
+		return
 	}
 
-	// Print worker nodes if available
-	if workerNodes, found := statusMap["workerNodes"]; found {
-		if nodeList, ok := workerNodes.([]interface{}); ok && len(nodeList) > 0 {
-			fmt.Println()
-			fmt.Println("Worker Nodes:")
-			for _, node := range nodeList {
-				fmt.Printf("  %v\n", node)
+	resourceReady, inferenceReady, workspaceReady := o.extractConditionStatuses(condList)
+
+	fmt.Printf("Resource Ready: %s\n", resourceReady)
+	fmt.Printf("Inference Ready: %s\n", inferenceReady)
+	fmt.Printf("Workspace Ready: %s\n", workspaceReady)
+}
+
+func (o *StatusOptions) extractConditionStatuses(condList []interface{}) (string, string, string) {
+	resourceReady := "Unknown"
+	inferenceReady := "Unknown"
+	workspaceReady := "Unknown"
+
+	for _, condition := range condList {
+		if condMap, ok := condition.(map[string]interface{}); ok {
+			condType, _ := condMap["type"].(string)
+			condStatus, _ := condMap["status"].(string)
+
+			switch condType {
+			case "ResourceReady":
+				resourceReady = condStatus
+			case "InferenceReady":
+				inferenceReady = condStatus
+			case "WorkspaceSucceeded":
+				workspaceReady = condStatus
 			}
 		}
 	}
 
-	// Print detailed conditions
+	return resourceReady, inferenceReady, workspaceReady
+}
+
+func (o *StatusOptions) printWorkerNodesList(statusMap map[string]interface{}) {
+	workerNodes, found := statusMap["workerNodes"]
+	if !found {
+		return
+	}
+
+	nodeList, ok := workerNodes.([]interface{})
+	if !ok || len(nodeList) == 0 {
+		return
+	}
+
 	fmt.Println()
-	o.printConditions(workspace)
+	fmt.Println("Worker Nodes:")
+	for _, node := range nodeList {
+		fmt.Printf("  %v\n", node)
+	}
 }
 
 func (o *StatusOptions) printConditions(workspace *unstructured.Unstructured) {
@@ -478,7 +509,7 @@ func (o *StatusOptions) printWorkerNodes(workspace *unstructured.Unstructured) {
 }
 
 func (o *StatusOptions) getInstanceType(workspace *unstructured.Unstructured) string {
-	instanceType, found, err := unstructured.NestedString(workspace.Object, "resource", "instanceType")
+	instanceType, found, err := unstructured.NestedString(workspace.Object, "spec", "resource", "instanceType")
 	if err != nil || !found {
 		klog.V(6).Infof("Instance type not found for workspace %s", workspace.GetName())
 		return "Unknown"

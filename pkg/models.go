@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/klog/v2"
@@ -39,6 +41,8 @@ const SupportedModelsURL = "https://raw.githubusercontent.com/kaito-project/kait
 
 // Model represents a supported AI model from the official Kaito repository
 type Model struct {
+	Tags         []string          `json:"tags" yaml:"tags"`
+	Properties   map[string]string `json:"properties,omitempty" yaml:"properties,omitempty"`
 	Name         string            `json:"name" yaml:"name"`
 	Type         string            `json:"type" yaml:"type"`
 	Runtime      string            `json:"runtime" yaml:"runtime"`
@@ -46,27 +50,25 @@ type Model struct {
 	Version      string            `json:"version" yaml:"version"`
 	Tag          string            `json:"tag" yaml:"tag"`
 	GPUMemory    string            `json:"gpu_memory" yaml:"gpuMemory"`
+	InstanceType string            `json:"instance_type,omitempty" yaml:"instanceType,omitempty"`
 	MinNodes     int               `json:"min_nodes" yaml:"minNodes"`
 	MaxNodes     int               `json:"max_nodes" yaml:"maxNodes"`
-	Tags         []string          `json:"tags" yaml:"tags"`
-	InstanceType string            `json:"instance_type,omitempty" yaml:"instanceType,omitempty"`
-	Properties   map[string]string `json:"properties,omitempty" yaml:"properties,omitempty"`
 }
 
 // KaitoSupportedModelsResponse represents the structure of the official supported_models.yaml
 type KaitoSupportedModelsResponse struct {
 	Models []struct {
+		Properties   map[string]string `yaml:"properties,omitempty"`
 		Name         string            `yaml:"name"`
 		Version      string            `yaml:"version,omitempty"`
 		Tag          string            `yaml:"tag,omitempty"`
 		Type         string            `yaml:"type,omitempty"`
 		Runtime      string            `yaml:"runtime,omitempty"`
 		GPUMemory    string            `yaml:"gpuMemory,omitempty"`
-		MinNodes     int               `yaml:"minNodes,omitempty"`
-		MaxNodes     int               `yaml:"maxNodes,omitempty"`
 		InstanceType string            `yaml:"instanceType,omitempty"`
 		Description  string            `yaml:"description,omitempty"`
-		Properties   map[string]string `yaml:"properties,omitempty"`
+		MinNodes     int               `yaml:"minNodes,omitempty"`
+		MaxNodes     int               `yaml:"maxNodes,omitempty"`
 	} `yaml:"models"`
 }
 
@@ -531,28 +533,86 @@ func sortModels(models []Model, sortBy string) {
 	}
 }
 
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	caser := cases.Title(language.English)
+	return caser.String(s)
+}
+
+func extractModelFamily(modelName string) string {
+	// Handle empty model name
+	if modelName == "" {
+		return "Unknown"
+	}
+
+	// Extract the family name from the first part of the model name
+	parts := strings.Split(modelName, "-")
+	if len(parts) > 0 {
+		family := parts[0]
+		// Handle empty first part
+		if family == "" {
+			return "Unknown"
+		}
+
+		// Handle special cases for multi-part family names
+		if len(parts) > 1 {
+			switch family {
+			case "llama":
+				// Handle llama-3.1, llama-3.3, etc.
+				if len(parts) > 1 && (strings.HasPrefix(parts[1], "3.") || strings.HasPrefix(parts[1], "2")) {
+					return capitalizeFirst(family)
+				}
+				return capitalizeFirst(family)
+			case "phi":
+				// Handle phi-2, phi-3, phi-3.5, phi-4, etc.
+				return capitalizeFirst(family)
+			case "qwen2.5":
+				// Handle qwen2.5-coder
+				return "Qwen2.5"
+			case "qwen2":
+				return "Qwen2"
+			case "deepseek":
+				// Handle deepseek-r1-distill-llama-8b, deepseek-r1-distill-qwen-14b
+				return "DeepSeek"
+			default:
+				return capitalizeFirst(family)
+			}
+		}
+		return capitalizeFirst(family)
+	}
+	return "Unknown"
+}
+
 func printModelsTable(models []Model) error {
 	klog.V(3).Info("Printing models table")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	defer w.Flush()
 
-	fmt.Fprintln(w, "NAME\tTYPE\tRUNTIME\tGPU MEMORY\tNODES\tDESCRIPTION")
+	fmt.Fprintln(w, "NAME\tTYPE\tFAMILY\tRUNTIME\tTAG")
 
 	for _, model := range models {
-		nodeRange := fmt.Sprintf("%d", model.MinNodes)
-		if model.MaxNodes > model.MinNodes {
-			nodeRange = fmt.Sprintf("%d-%d", model.MinNodes, model.MaxNodes)
+		// Skip base model
+		if strings.ToLower(model.Name) == "base" {
+			continue
 		}
 
-		description := model.Description
-		if len(description) > 50 {
-			description = description[:47] + "..."
-		}
+		// Extract family from first part of model name
+		family := extractModelFamily(model.Name)
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			model.Name, model.Type, model.Runtime, model.GPUMemory, nodeRange, description)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			model.Name, model.Type, family, model.Runtime, model.Tag)
 	}
+
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("💡 Note: For deployment guidance and instanceType requirements,")
+	fmt.Println("   use 'kubectl kaito models describe <model>' or refer to Kaito workspace examples.")
 
 	return nil
 }
@@ -570,8 +630,6 @@ func printModelsDetailed(models []Model) error {
 		fmt.Printf("Runtime: %s\n", model.Runtime)
 		fmt.Printf("Version: %s\n", model.Version)
 		fmt.Printf("Description: %s\n", model.Description)
-		fmt.Printf("GPU Memory: %s\n", model.GPUMemory)
-		fmt.Printf("Node Range: %d-%d\n", model.MinNodes, model.MaxNodes)
 		if len(model.Tags) > 0 {
 			fmt.Printf("Tags: %s\n", strings.Join(model.Tags, ", "))
 		}
@@ -605,9 +663,12 @@ func printModelDetail(model Model) error {
 	fmt.Printf("Version: %s\n", model.Version)
 	fmt.Println()
 	fmt.Println("Resource Requirements:")
-	fmt.Printf("  GPU Memory: %s\n", model.GPUMemory)
-	fmt.Printf("  Minimum Nodes: %d\n", model.MinNodes)
-	fmt.Printf("  Maximum Nodes: %d\n", model.MaxNodes)
+	fmt.Println("  💡 GPU requirements are not available in the official Kaito repository.")
+	fmt.Println("     For instanceType guidance, refer to:")
+	fmt.Println("     - Kaito workspace examples in the GitHub repository")
+	fmt.Println("     - Azure VM sizes documentation")
+	fmt.Println("     - Hugging Face model cards for model sizes")
+	fmt.Println("     - Community benchmarks")
 	fmt.Println()
 	if len(model.Tags) > 0 {
 		fmt.Printf("Tags: %s\n", strings.Join(model.Tags, ", "))
