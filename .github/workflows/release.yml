@@ -126,13 +126,13 @@ jobs:
           ./hack/prepare-krew-release.sh ${{ steps.get-version.outputs.version }}
 
       - name: Upload krew manifest
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: krew-manifest
           path: krew/kaito-${{ steps.get-version.outputs.version }}.yaml
 
       - name: Upload release archives
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release-archives
           path: dist/archives/
@@ -180,19 +180,16 @@ jobs:
     needs: [prepare-release, goreleaser]
     steps:
       - name: Download krew manifest
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: krew-manifest
 
       - name: Upload krew manifest to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.goreleaser.outputs.upload_url }}
-          asset_path: ./kaito-${{ needs.prepare-release.outputs.version }}.yaml
-          asset_name: kaito.yaml
-          asset_content_type: application/x-yaml
+          tag_name: ${{ needs.prepare-release.outputs.version }}
+          files: kaito-${{ needs.prepare-release.outputs.version }}.yaml
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   test-krew-install:
     name: Test Krew Installation
@@ -218,7 +215,7 @@ jobs:
         run: echo "$HOME/.krew/bin" >> $GITHUB_PATH
 
       - name: Download krew manifest
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: krew-manifest
 
@@ -248,7 +245,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download krew manifest
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: krew-manifest
 
@@ -296,7 +293,7 @@ jobs:
           echo "::notice::Krew index submission instructions created. Check pr-instructions.md in the artifacts."
 
       - name: Upload PR instructions
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: krew-pr-instructions
           path: pr-instructions.md
