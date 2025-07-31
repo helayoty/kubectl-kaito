@@ -10,6 +10,8 @@ kubectl-kaito simplifies AI model deployment on Kubernetes by providing an intui
 
 ## Features
 
+![kubectl-kaito Demo](docs/kubectl-kaito-demo.gif)
+
 - **One-command deployment** Deploy AI models with a single command that automatically provisions GPU nodes and configures the inference stack
 - **Real-time monitoring** Monitor workspace deployment status with real-time conditions, NodeClaim tracking, and detailed health checks
 - **OpenAI-compatible APIs** Interact with deployed models through an OpenAI-compatible chat interface with customizable system prompts
