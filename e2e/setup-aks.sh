@@ -30,10 +30,10 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # Default values - can be overridden by environment variables
 AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-kaito-e2e-aks-$(date +%s)}"
 AKS_RESOURCE_GROUP="${AKS_RESOURCE_GROUP:-kaito-e2e-rg-$(date +%s)}"
-AKS_LOCATION="${AKS_LOCATION:-westus2}"
+AKS_LOCATION="${AKS_LOCATION:-eastus}"
 AKS_NODE_VM_SIZE="${AKS_NODE_VM_SIZE:-Standard_NC6s_v3}"
 AKS_NODE_COUNT="${AKS_NODE_COUNT:-1}"
-KUBERNETES_VERSION="${KUBERNETES_VERSION:-1.28.0}"
+KUBERNETES_VERSION="${KUBERNETES_VERSION:-1.33.0}"
 
 TIMEOUT_CLUSTER=20m
 TIMEOUT_INSTALL=5m
@@ -59,20 +59,6 @@ install_kubectl() {
         sudo mv kubectl /usr/local/bin/
     else
         echo -e "${RED}❌ Unable to install kubectl: no suitable package manager found${NC}"
-        exit 1
-    fi
-}
-
-# Function to install helm
-install_helm() {
-    echo -e "${YELLOW}📦 Installing helm...${NC}"
-    
-    if command_exists brew; then
-        brew install helm
-    elif command_exists curl; then
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    else
-        echo -e "${RED}❌ Unable to install helm: no suitable package manager found${NC}"
         exit 1
     fi
 }
@@ -181,7 +167,8 @@ timeout "${TIMEOUT_CLUSTER}" az aks create \
     --node-count "${AKS_NODE_COUNT}" \
     --node-vm-size "${AKS_NODE_VM_SIZE}" \
     --generate-ssh-keys \
-    --enable-addons monitoring \
+    --enable-oidc-issuer \
+    --enable-ai-toolchain-operator \
     --kubernetes-version "${KUBERNETES_VERSION}"
 
 # Get credentials
@@ -194,33 +181,14 @@ az aks get-credentials \
 echo -e "${BLUE}⏳ Waiting for cluster to be ready...${NC}"
 timeout "${TIMEOUT_CLUSTER}" kubectl wait --for=condition=Ready nodes --all --timeout=900s
 
-# Install Kaito helm chart
-echo -e "${BLUE}📦 Installing Kaito helm chart...${NC}"
-
-# Add Kaito helm repository
-helm repo add kaito https://azure.github.io/kaito
-helm repo update
-
 # Create kaito-system namespace
 kubectl create namespace kaito-system --dry-run=client -o yaml | kubectl apply -f -
-
-# Install Kaito operator
-timeout "${TIMEOUT_INSTALL}" helm install kaito kaito/kaito \
-    --namespace kaito-system \
-    --wait \
-    --timeout 300s
-
-echo -e "${BLUE}⏳ Waiting for Kaito operator to be ready...${NC}"
-kubectl wait --for=condition=Available deployment/kaito-controller-manager \
-    --namespace kaito-system \
-    --timeout=300s
 
 echo -e "${GREEN}✅ AKS cluster setup complete!${NC}"
 echo -e "${GREEN}   Cluster: ${AKS_CLUSTER_NAME}${NC}"
 echo -e "${GREEN}   Resource Group: ${AKS_RESOURCE_GROUP}${NC}"
 echo -e "${GREEN}   Location: ${AKS_LOCATION}${NC}"
 echo -e "${GREEN}   Context: ${AKS_CLUSTER_NAME}${NC}"
-echo -e "${GREEN}   Kaito operator: Installed and ready${NC}"
 
 # Save cluster info for cleanup
 cat > "${SCRIPT_DIR}/aks-cluster-info.env" <<EOF

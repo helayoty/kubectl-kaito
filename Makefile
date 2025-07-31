@@ -12,6 +12,11 @@ PKG = github.com/kaito-project/kubectl-kaito
 CMD_PKG = ./cmd/kubectl-kaito
 LDFLAGS = -ldflags "-X ${PKG}/pkg/cmd.version=${VERSION} -X ${PKG}/pkg/cmd.commit=${COMMIT} -X ${PKG}/pkg/cmd.date=${DATE}"
 
+GOLANGCI_LINT_VER := latest
+GOLANGCI_LINT_BIN := golangci-lint
+GOLANGCI_LINT := $(abspath $(TOOLS_BIN_DIR)/$(GOLANGCI_LINT_BIN)-$(GOLANGCI_LINT_VER))
+
+
 # Default target
 .PHONY: all
 all: build
@@ -84,9 +89,21 @@ cleanup-aks:
 	./e2e/cleanup-aks.sh
 
 # Lint the code
+
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT) ## Download and install golangci-lint locally.
+
+.PHONY: ginkgo
+ginkgo: $(GOLANGCI_LINT) ## Download and install ginkgo locally.
+
+$(GOLANGCI_LINT): ## Download and install golangci-lint locally.
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/golangci/golangci-lint/cmd/golangci-lint $(GOLANGCI_LINT_BIN) $(GOLANGCI_LINT_VER)
+
+
 .PHONY: lint
-lint:
-	golangci-lint run ./...
+lint: $(GOLANGCI_LINT) ## Run golangci-lint against code.
+	$(GOLANGCI_LINT) run -v
+
 
 # Format the code
 .PHONY: fmt

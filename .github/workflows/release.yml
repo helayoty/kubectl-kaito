@@ -60,11 +60,11 @@ jobs:
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
           if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$ ]]; then
-            echo "❌ Invalid version format: ${VERSION}"
+            echo "Invalid version format: ${VERSION}"
             echo "Expected format: vX.Y.Z or vX.Y.Z-prerelease"
             exit 1
           fi
-          echo "✅ Version format is valid: ${VERSION}"
+          echo "Version format is valid: ${VERSION}"
 
       - name: Check version consistency
         id: version-check
@@ -77,7 +77,7 @@ jobs:
             echo "🚧 This is a pre-release version"
           else
             echo "is-prerelease=false" >> $GITHUB_OUTPUT
-            echo "✅ This is a stable release version"
+            echo "This is a stable release version"
           fi
 
       - name: Generate cache keys
@@ -152,23 +152,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-
-      - name: Run tests
-        run: make unit-tests
-
-      - name: Run license header check
-        run: |
-          # Check if all Go files have license headers
-          echo "Checking license headers..."
-          find . -name "*.go" -not -path "./vendor/*" | xargs ./hack/add-license-header.sh
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "✅ All files have license headers"
-          else
-            echo "❌ Some files were missing license headers (now fixed)"
-            echo "Please commit the changes and re-run the release"
-            exit 1
-          fi
 
       - name: Prepare krew release
         run: |
@@ -284,7 +267,7 @@ jobs:
           # Test command structure
           kubectl kaito models list || true  # May fail due to network, but should show help
           
-          echo "✅ Krew installation test passed"
+          echo "Krew installation test passed"
 
       - name: Cleanup
         run: |

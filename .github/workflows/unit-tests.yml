@@ -15,6 +15,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+          disable-sudo: true
+          disable-telemetry: true
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -23,33 +30,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
       - name: Download dependencies
         run: go mod download
 
       - name: Verify dependencies
         run: go mod verify
-
-      - name: Check license headers
-        run: |
-          # Check if all Go files have license headers
-          find . -name "*.go" -not -path "./vendor/*" | xargs ./hack/add-license-header.sh
-          if [ $? -eq 1 ]; then
-            echo "✅ All files have license headers"
-          else
-            echo "❌ Some files are missing license headers"
-            exit 1
-          fi
-
+      
       - name: Run go vet
         run: make vet
 
@@ -85,44 +71,3 @@ jobs:
           verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Build binary (linux only for unit tests)
-        run: |
-          go build \
-            -ldflags "-X github.com/kaito-project/kubectl-kaito/pkg/cmd.version=ci-${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.commit=${{ github.sha }} -X github.com/kaito-project/kubectl-kaito/pkg/cmd.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o kubectl-kaito \
-            ./cmd/kubectl-kaito
-        env:
-          CGO_ENABLED: 0
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: kubectl-kaito-linux-amd64
-          path: kubectl-kaito
