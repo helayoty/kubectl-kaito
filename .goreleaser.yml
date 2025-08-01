@@ -4,7 +4,7 @@ before:
     - go mod tidy
 
 builds:
-  - id: kubectl-kaito
+  - id: kaito-kubectl-plugin
     main: ./cmd/kubectl-kaito
     binary: bin/kubectl-kaito
     env:
@@ -36,7 +36,7 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     files:
-    - LICENSE
+      - LICENSE
 
 changelog:
   groups:

@@ -23,7 +23,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
-echo "🔍 Checking prerequisites for kubectl-kaito e2e tests..."
+echo "🔍 Checking prerequisites for kaito-kubectl-plugin e2e tests..."
 echo ""
 
 # Track overall status

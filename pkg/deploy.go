@@ -28,34 +28,34 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/yaml"
 )
 
 // DeployOptions holds the options for the deploy command
 type DeployOptions struct {
-	configFlags          *genericclioptions.ConfigFlags
-	Adapters             []string
-	InputURLs            []string
-	PreferredNodes       []string
-	LabelSelector        map[string]string
-	WorkspaceName        string
-	Namespace            string
-	Model                string
-	InstanceType         string
-	ModelAccessSecret    string
-	InferenceConfig      string
-	TuningMethod         string
-	OutputImage          string
-	OutputImageSecret    string
-	TuningConfig         string
-	InputPVC             string
-	OutputPVC            string
-	ModelAccessMode      string
-	ModelImage           string
-	Count                int
-	DryRun               bool
-	BypassResourceChecks bool
-	EnableLoadBalancer   bool
-	Tuning               bool
+	configFlags        *genericclioptions.ConfigFlags
+	Adapters           []string
+	InputURLs          []string
+	PreferredNodes     []string
+	LabelSelector      map[string]string
+	WorkspaceName      string
+	Namespace          string
+	Model              string
+	InstanceType       string
+	ModelAccessSecret  string
+	InferenceConfig    string
+	TuningMethod       string
+	OutputImage        string
+	OutputImageSecret  string
+	TuningConfig       string
+	InputPVC           string
+	OutputPVC          string
+	ModelAccessMode    string
+	ModelImage         string
+	Count              int
+	DryRun             bool
+	EnableLoadBalancer bool
+	Tuning             bool
 }
 
 // NewDeployCmd creates the deploy command
@@ -78,14 +78,17 @@ the specified model according to Kaito's preset configurations.`,
 		Example: `  # Deploy Llama-2 7B for inference
   kubectl kaito deploy --workspace-name llama-workspace --model llama-2-7b
 
-  # Deploy with specific instance type and count  
-  kubectl kaito deploy --workspace-name phi-workspace --model phi-3.5-mini-instruct --instance-type Standard_NC6s_v3 --count 2
+  # Deploy with specific instance type, count, and private model access
+  kubectl kaito deploy --workspace-name phi-workspace --model phi-3.5-mini-instruct --instance-type Standard_NC6s_v3 --count 2 --model-access-secret my-secret
 
-  # Deploy for fine-tuning with QLoRA
+  # Deploy for fine-tuning with QLoRA (tuning mode)
   kubectl kaito deploy --workspace-name tune-phi --model phi-3.5-mini-instruct --tuning --tuning-method qlora --input-urls "https://example.com/data.parquet" --output-image myregistry/phi-finetuned:latest
 
-  # Deploy with load balancer for external access
-  kubectl kaito deploy --workspace-name public-llama --model llama-2-7b --enable-load-balancer`,
+  # Deploy for fine-tuning with PVC storage
+  kubectl kaito deploy --workspace-name tune-llama --model llama-3.1-8b-instruct --tuning --input-pvc training-data --output-pvc model-output
+
+  # Deploy with load balancer for external access (inference mode)
+  kubectl kaito deploy --workspace-name public-llama --model llama-3.1-8b-instruct --enable-load-balancer`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.Validate(); err != nil {
 				return err
@@ -106,6 +109,7 @@ the specified model according to Kaito's preset configurations.`,
 	// Inference specific flags
 	cmd.Flags().StringVar(&o.ModelAccessSecret, "model-access-secret", "", "Secret for private model access")
 	cmd.Flags().StringSliceVar(&o.Adapters, "adapters", nil, "Model adapters to load")
+	cmd.Flags().StringVar(&o.InferenceConfig, "inference-config", "", "Custom inference configuration")
 
 	// Tuning specific flags
 	cmd.Flags().BoolVar(&o.Tuning, "tuning", false, "Enable fine-tuning mode")
@@ -113,10 +117,12 @@ the specified model according to Kaito's preset configurations.`,
 	cmd.Flags().StringSliceVar(&o.InputURLs, "input-urls", nil, "URLs to training data")
 	cmd.Flags().StringVar(&o.OutputImage, "output-image", "", "Output image for fine-tuned model")
 	cmd.Flags().StringVar(&o.OutputImageSecret, "output-image-secret", "", "Secret for pushing output image")
+	cmd.Flags().StringVar(&o.TuningConfig, "tuning-config", "", "Custom tuning configuration")
+	cmd.Flags().StringVar(&o.InputPVC, "input-pvc", "", "PVC containing training data")
+	cmd.Flags().StringVar(&o.OutputPVC, "output-pvc", "", "PVC for output storage")
 
 	// Special options
 	cmd.Flags().BoolVar(&o.DryRun, "dry-run", false, "Show what would be created without actually creating")
-	cmd.Flags().BoolVar(&o.BypassResourceChecks, "bypass-resource-checks", false, "Skip resource availability checks")
 	cmd.Flags().BoolVar(&o.EnableLoadBalancer, "enable-load-balancer", false, "Create LoadBalancer service for external access")
 
 	// Mark required flags
@@ -146,6 +152,11 @@ func (o *DeployOptions) Validate() error {
 		return err
 	}
 
+	// Check for conflicting inference/tuning parameters
+	if err := o.validateModeFlags(); err != nil {
+		return err
+	}
+
 	// Validate tuning specific requirements
 	if o.Tuning {
 		if len(o.InputURLs) == 0 && o.InputPVC == "" {
@@ -157,6 +168,54 @@ func (o *DeployOptions) Validate() error {
 	}
 
 	klog.V(4).Info("Deploy options validation completed successfully")
+	return nil
+}
+
+// validateModeFlags ensures users don't mix inference and tuning parameters
+func (o *DeployOptions) validateModeFlags() error {
+	// Define inference-specific flags
+	inferenceFlags := []struct {
+		name  string
+		value interface{}
+		empty bool
+	}{
+		{"model-access-secret", o.ModelAccessSecret, o.ModelAccessSecret == ""},
+		{"adapters", o.Adapters, len(o.Adapters) == 0},
+		{"inference-config", o.InferenceConfig, o.InferenceConfig == ""},
+		{"enable-load-balancer", o.EnableLoadBalancer, !o.EnableLoadBalancer},
+	}
+
+	// Define tuning-specific flags (excluding tuning-method which has a default value)
+	tuningFlags := []struct {
+		name  string
+		value interface{}
+		empty bool
+	}{
+		{"input-urls", o.InputURLs, len(o.InputURLs) == 0},
+		{"output-image", o.OutputImage, o.OutputImage == ""},
+		{"output-image-secret", o.OutputImageSecret, o.OutputImageSecret == ""},
+		{"tuning-config", o.TuningConfig, o.TuningConfig == ""},
+		{"input-pvc", o.InputPVC, o.InputPVC == ""},
+		{"output-pvc", o.OutputPVC, o.OutputPVC == ""},
+	}
+
+	// Check if tuning mode is explicitly enabled
+	if o.Tuning {
+		// In tuning mode, check if any inference-specific flags are set
+		for _, flag := range inferenceFlags {
+			if !flag.empty {
+				return fmt.Errorf("cannot use inference flag --%s when --tuning is enabled", flag.name)
+			}
+		}
+	} else {
+		// In inference mode (default), check if any tuning-specific flags are set
+		for _, flag := range tuningFlags {
+			if !flag.empty {
+				return fmt.Errorf("tuning flag --%s can only be used with --tuning enabled", flag.name)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -243,6 +302,17 @@ func (o *DeployOptions) buildWorkspace() *unstructured.Unstructured {
 		},
 	}
 
+	// Add LoadBalancer annotation if requested
+	if o.EnableLoadBalancer {
+		metadata := workspace.Object["metadata"].(map[string]interface{})
+		if metadata["annotations"] == nil {
+			metadata["annotations"] = map[string]interface{}{}
+		}
+		annotations := metadata["annotations"].(map[string]interface{})
+		annotations["kaito.sh/enable-lb"] = "true"
+		klog.V(4).Info("Added LoadBalancer annotation to workspace")
+	}
+
 	// Add the spec fields at the top level (not inside a spec field)
 	spec := o.createWorkspaceSpec()
 	for key, value := range spec {
@@ -305,12 +375,31 @@ func (o *DeployOptions) createWorkspaceSpec() map[string]interface{} {
 			tuning["input"] = map[string]interface{}{
 				"urls": o.InputURLs,
 			}
+		} else if o.InputPVC != "" {
+			tuning["input"] = map[string]interface{}{
+				"pvc": o.InputPVC,
+			}
 		}
 
 		if o.OutputImage != "" {
 			tuning["output"] = map[string]interface{}{
 				"image": o.OutputImage,
 			}
+		} else if o.OutputPVC != "" {
+			tuning["output"] = map[string]interface{}{
+				"pvc": o.OutputPVC,
+			}
+		}
+
+		if o.OutputImageSecret != "" {
+			if tuning["output"] == nil {
+				tuning["output"] = map[string]interface{}{}
+			}
+			tuning["output"].(map[string]interface{})["imageSecret"] = o.OutputImageSecret
+		}
+
+		if o.TuningConfig != "" {
+			tuning["config"] = o.TuningConfig
 		}
 
 		spec["tuning"] = tuning
@@ -336,6 +425,12 @@ func (o *DeployOptions) createWorkspaceSpec() map[string]interface{} {
 		if len(o.Adapters) > 0 {
 			inference["adapters"] = o.Adapters
 			klog.V(4).Infof("Added adapters: %v", o.Adapters)
+		}
+
+		// Add inference config if specified
+		if o.InferenceConfig != "" {
+			inference["config"] = o.InferenceConfig
+			klog.V(4).Info("Added custom inference configuration")
 		}
 
 		spec["inference"] = inference
@@ -365,13 +460,34 @@ func (o *DeployOptions) showDryRun() error {
 		if len(o.InputURLs) > 0 {
 			fmt.Printf("Input URLs: %v\n", o.InputURLs)
 		}
+		if o.InputPVC != "" {
+			fmt.Printf("Input PVC: %s\n", o.InputPVC)
+		}
 		if o.OutputImage != "" {
 			fmt.Printf("Output Image: %s\n", o.OutputImage)
+		}
+		if o.OutputPVC != "" {
+			fmt.Printf("Output PVC: %s\n", o.OutputPVC)
+		}
+		if o.OutputImageSecret != "" {
+			fmt.Printf("Output Image Secret: %s\n", o.OutputImageSecret)
+		}
+		if o.TuningConfig != "" {
+			fmt.Printf("Tuning Config: %s\n", o.TuningConfig)
 		}
 	} else {
 		fmt.Println("Mode: Inference")
 		if len(o.Adapters) > 0 {
 			fmt.Printf("Adapters: %v\n", o.Adapters)
+		}
+		if o.ModelAccessSecret != "" {
+			fmt.Printf("Model Access Secret: %s\n", o.ModelAccessSecret)
+		}
+		if o.InferenceConfig != "" {
+			fmt.Printf("Inference Config: %s\n", o.InferenceConfig)
+		}
+		if o.EnableLoadBalancer {
+			fmt.Println("LoadBalancer: Enabled")
 		}
 	}
 
@@ -381,6 +497,21 @@ func (o *DeployOptions) showDryRun() error {
 
 	fmt.Println()
 	fmt.Println("✓ Workspace definition is valid")
+
+	// Also show the actual workspace YAML that would be created
+	workspace := o.buildWorkspace()
+
+	// Convert to YAML for display
+	yamlData, err := yaml.Marshal(workspace.Object)
+	if err != nil {
+		klog.Errorf("Failed to marshal workspace to YAML: %v", err)
+	} else {
+		fmt.Println()
+		fmt.Println("Workspace YAML:")
+		fmt.Println("===============")
+		fmt.Printf("%s", string(yamlData))
+	}
+
 	fmt.Println("ℹ️  Run without --dry-run to create the workspace")
 
 	return nil

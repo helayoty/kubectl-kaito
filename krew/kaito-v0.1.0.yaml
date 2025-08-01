@@ -3,14 +3,15 @@ kind: Plugin
 metadata:
   name: kaito
 spec:
-  version: {{ .TagName }}
+  version: v0.1.0
   homepage: https://github.com/kaito-project/kaito-kubectl-plugin
   platforms:
   - selector:
       matchLabels:
         os: linux
         arch: amd64
-    {{addURIAndSha "https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/{{ .TagName }}/kubectl-kaito-{{ .Version }}-linux-amd64.tar.gz" .TagName }}
+    uri: https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/v0.1.0/kubectl-kaito-0.1.0-linux-amd64.tar.gz
+    sha256: 0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5
     files:
     - from: "./kubectl-kaito"
       to: "."
@@ -21,7 +22,8 @@ spec:
       matchLabels:
         os: linux
         arch: arm64
-    {{addURIAndSha "https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/{{ .TagName }}/kubectl-kaito-{{ .Version }}-linux-arm64.tar.gz" .TagName }}
+    uri: https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/v0.1.0/kubectl-kaito-0.1.0-linux-arm64.tar.gz
+    sha256: 0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5
     files:
     - from: "./kubectl-kaito"
       to: "."
@@ -32,7 +34,8 @@ spec:
       matchLabels:
         os: darwin
         arch: amd64
-    {{addURIAndSha "https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/{{ .TagName }}/kubectl-kaito-{{ .Version }}-darwin-amd64.tar.gz" .TagName }}
+    uri: https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/v0.1.0/kubectl-kaito-0.1.0-darwin-amd64.tar.gz
+    sha256: 0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5
     files:
     - from: "./kubectl-kaito"
       to: "."
@@ -43,7 +46,8 @@ spec:
       matchLabels:
         os: darwin
         arch: arm64
-    {{addURIAndSha "https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/{{ .TagName }}/kubectl-kaito-{{ .Version }}-darwin-arm64.tar.gz" .TagName }}
+    uri: https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/v0.1.0/kubectl-kaito-0.1.0-darwin-arm64.tar.gz
+    sha256: 0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5
     files:
     - from: "./kubectl-kaito"
       to: "."
@@ -54,7 +58,8 @@ spec:
       matchLabels:
         os: windows
         arch: amd64
-    {{addURIAndSha "https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/{{ .TagName }}/kubectl-kaito-{{ .Version }}-windows-amd64.tar.gz" .TagName }}
+    uri: https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/v0.1.0/kubectl-kaito-0.1.0-windows-amd64.tar.gz
+    sha256: 0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5
     files:
     - from: "./kubectl-kaito.exe"
       to: "."

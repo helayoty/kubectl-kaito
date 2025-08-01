@@ -74,6 +74,108 @@ func TestDeployOptionsValidation(t *testing.T) {
 			},
 			expectError: true,
 		},
+		{
+			name: "Tuning mode with valid tuning flags",
+			options: DeployOptions{
+				WorkspaceName: "test-workspace",
+				Model:         "phi-3.5-mini-instruct",
+				Tuning:        true,
+				TuningMethod:  "qlora",
+				InputURLs:     []string{"https://example.com/data.parquet"},
+				OutputImage:   "myregistry/model:latest",
+			},
+			expectError: false,
+		},
+		{
+			name: "Inference mode with valid inference flags",
+			options: DeployOptions{
+				WorkspaceName:     "test-workspace",
+				Model:             "phi-3.5-mini-instruct",
+				ModelAccessSecret: "my-secret",
+				Adapters:          []string{"adapter1", "adapter2"},
+			},
+			expectError: false,
+		},
+		{
+			name: "Tuning mode with inference flags - should fail",
+			options: DeployOptions{
+				WorkspaceName:     "test-workspace",
+				Model:             "phi-3.5-mini-instruct",
+				Tuning:            true,
+				TuningMethod:      "qlora",
+				InputURLs:         []string{"https://example.com/data.parquet"},
+				OutputImage:       "myregistry/model:latest",
+				ModelAccessSecret: "my-secret", // This should cause validation to fail
+			},
+			expectError: true,
+		},
+		{
+			name: "Inference mode with tuning flags - should fail",
+			options: DeployOptions{
+				WorkspaceName: "test-workspace",
+				Model:         "phi-3.5-mini-instruct",
+				InputURLs:     []string{"https://example.com/data.parquet"}, // This should cause validation to fail
+			},
+			expectError: true,
+		},
+		{
+			name: "Tuning mode missing input data",
+			options: DeployOptions{
+				WorkspaceName: "test-workspace",
+				Model:         "phi-3.5-mini-instruct",
+				Tuning:        true,
+				TuningMethod:  "qlora",
+				OutputImage:   "myregistry/model:latest",
+				// Missing InputURLs or InputPVC
+			},
+			expectError: true,
+		},
+		{
+			name: "Tuning mode missing output",
+			options: DeployOptions{
+				WorkspaceName: "test-workspace",
+				Model:         "phi-3.5-mini-instruct",
+				Tuning:        true,
+				TuningMethod:  "qlora",
+				InputURLs:     []string{"https://example.com/data.parquet"},
+				// Missing OutputImage or OutputPVC
+			},
+			expectError: true,
+		},
+		{
+			name: "Tuning mode with PVC options",
+			options: DeployOptions{
+				WorkspaceName: "test-workspace",
+				Model:         "phi-3.5-mini-instruct",
+				Tuning:        true,
+				TuningMethod:  "qlora",
+				InputPVC:      "training-data",
+				OutputPVC:     "model-output",
+			},
+			expectError: false,
+		},
+		{
+			name: "Inference mode with LoadBalancer enabled",
+			options: DeployOptions{
+				WorkspaceName:      "test-workspace",
+				Model:              "phi-3.5-mini-instruct",
+				EnableLoadBalancer: true,
+			},
+			expectError: false,
+		},
+		{
+			name: "Tuning mode with LoadBalancer - should fail",
+			options: DeployOptions{
+				WorkspaceName:      "test-workspace",
+				Model:              "phi-3.5-mini-instruct",
+				Tuning:             true,
+				TuningMethod:       "qlora",
+				InputURLs:          []string{"https://example.com/data.parquet"},
+				OutputImage:        "myregistry/model:latest",
+				EnableLoadBalancer: true,
+			},
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +186,63 @@ func TestDeployOptionsValidation(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestBuildWorkspaceWithLoadBalancer(t *testing.T) {
+	tests := []struct {
+		name               string
+		enableLoadBalancer bool
+		expectAnnotation   bool
+	}{
+		{
+			name:               "LoadBalancer enabled",
+			enableLoadBalancer: true,
+			expectAnnotation:   true,
+		},
+		{
+			name:               "LoadBalancer disabled",
+			enableLoadBalancer: false,
+			expectAnnotation:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			options := &DeployOptions{
+				WorkspaceName:      "test-workspace",
+				Model:              "phi-3.5-mini-instruct",
+				Namespace:          "default",
+				EnableLoadBalancer: tt.enableLoadBalancer,
+				Count:              1,
+			}
+
+			workspace := options.buildWorkspace()
+
+			// Check if workspace has the correct structure
+			assert.Equal(t, "kaito.sh/v1beta1", workspace.Object["apiVersion"])
+			assert.Equal(t, "Workspace", workspace.Object["kind"])
+
+			// Check metadata
+			metadata, ok := workspace.Object["metadata"].(map[string]interface{})
+			assert.True(t, ok, "Expected metadata to be a map")
+
+			// Check LoadBalancer annotation
+			if tt.expectAnnotation {
+				annotations, ok := metadata["annotations"].(map[string]interface{})
+				assert.True(t, ok, "Expected annotations to be present when LoadBalancer is enabled")
+
+				enableLB, exists := annotations["kaito.sh/enable-lb"]
+				assert.True(t, exists, "Expected kaito.sh/enable-lb annotation to be present")
+				assert.Equal(t, "true", enableLB, "Expected kaito.sh/enable-lb annotation to be 'true'")
+			} else {
+				// When LoadBalancer is disabled, annotations should either not exist or not contain the LB annotation
+				if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+					_, exists := annotations["kaito.sh/enable-lb"]
+					assert.False(t, exists, "Expected kaito.sh/enable-lb annotation to NOT be present when LoadBalancer is disabled")
+				}
 			}
 		})
 	}

@@ -25,47 +25,54 @@ kaito deploy [flags]
 | ------------------------- | ------ | ------------------------------------------ |
 | `--workspace-name string` | string | Name of the workspace to create (required) |
 | `--model string`          | string | Model name to deploy (required)            |
+| `--instance-type string`  | string | GPU instance type (e.g., Standard_NC6s_v3) |
 
 ### Optional Flags
 
-| Flag                       | Type   | Default | Description                                          |
-| -------------------------- | ------ | ------- | ---------------------------------------------------- |
-| `--instance-type string`   | string |         | GPU instance type (e.g., Standard_NC6s_v3)           |
-| `--count int`              | int    | 1       | Number of GPU nodes                                  |
-| `--dry-run`                | bool   | false   | Show what would be created without actually creating |
-| `--enable-load-balancer`   | bool   | false   | Create LoadBalancer service for external access      |
-| `--bypass-resource-checks` | bool   | false   | Skip resource availability checks                    |
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
 
-### Model Access Flags
+| `--count int`            | int    | 1       | Number of GPU nodes                                  |
+| `--dry-run`              | bool   | false   | Show what would be created without actually creating |
+| `--enable-load-balancer` | bool   | false   | Enable LoadBalancer service for external access      |
+| `--node-selector stringToString` | map  | Node selector labels |
+
+### Inference-Specific Flags
+
+These flags can only be used when `--tuning` is **not** enabled (default inference mode):
 
 | Flag                           | Type     | Description                     |
 | ------------------------------ | -------- | ------------------------------- |
 | `--model-access-secret string` | string   | Secret for private model access |
 | `--adapters strings`           | []string | Model adapters to load          |
+| `--inference-config string`    | string   | Custom inference configuration  |
 
 ### Fine-tuning Flags
+
+These flags can only be used when `--tuning` is **enabled**:
 
 | Flag                           | Type     | Default | Description                       |
 | ------------------------------ | -------- | ------- | --------------------------------- |
 | `--tuning`                     | bool     | false   | Enable fine-tuning mode           |
 | `--tuning-method string`       | string   | qlora   | Fine-tuning method (qlora, lora)  |
 | `--input-urls strings`         | []string |         | URLs to training data             |
+| `--input-pvc string`           | string   |         | PVC containing training data      |
 | `--output-image string`        | string   |         | Output image for fine-tuned model |
+| `--output-pvc string`          | string   |         | PVC for output storage            |
 | `--output-image-secret string` | string   |         | Secret for pushing output image   |
+| `--tuning-config string`       | string   |         | Custom tuning configuration       |
 
-### Advanced Flags
-
-| Flag                             | Type | Description          |
-| -------------------------------- | ---- | -------------------- |
-| `--node-selector stringToString` | map  | Node selector labels |
+> **Note**: You cannot mix inference and tuning flags. When `--tuning` is enabled, inference-specific flags (`--model-access-secret`, `--adapters`, `--inference-config`) cannot be used. When `--tuning` is not enabled, tuning-specific flags cannot be used.
 
 ## Examples
 
 ### Basic Inference Deployment
 
 ```bash
-# Deploy Llama-2 7B for inference
-kubectl kaito deploy --workspace-name llama-workspace --model llama-2-7b
+# Deploy Llama-3.1 8b for inference
+kubectl kaito deploy --workspace-name llama-workspace \
+--model llama-3.1-8b-instruct \
+--model-access-secret hf-token
 ```
 
 ### Deployment with Specific Instance Type
@@ -82,7 +89,7 @@ kubectl kaito deploy \
 ### Fine-tuning Deployment
 
 ```bash
-# Deploy for fine-tuning with QLoRA
+# Deploy for fine-tuning with QLoRA using URLs
 kubectl kaito deploy \
   --workspace-name tune-phi \
   --model phi-3.5-mini-instruct \
@@ -90,6 +97,14 @@ kubectl kaito deploy \
   --tuning-method qlora \
   --input-urls "https://example.com/data.parquet" \
   --output-image myregistry/phi-finetuned:latest
+
+# Deploy for fine-tuning with PVC storage
+kubectl kaito deploy \
+  --workspace-name tune-llama \
+  --model llama-3.1-8b-instruct \
+  --tuning \
+  --input-pvc training-data \
+  --output-pvc model-output
 ```
 
 ### External Access Deployment
@@ -98,7 +113,7 @@ kubectl kaito deploy \
 # Deploy with load balancer for external access
 kubectl kaito deploy \
   --workspace-name public-llama \
-  --model llama-2-7b \
+  --model llama-3.1-8b-instruct \
   --enable-load-balancer
 ```
 
@@ -122,33 +137,33 @@ kubectl kaito deploy \
   --node-selector gpu-type=A100,zone=us-west-2a
 ```
 
-## Supported Models
-
-Use `kubectl kaito models list` to see all supported models. Common models include:
-
-- `llama-2-7b`, `llama-2-13b`, `llama-2-70b`
-- `phi-3.5-mini-instruct`, `phi-3.5-medium-instruct`
-- `mistral-7b-instruct`, `mixtral-8x7b-instruct`
-- `falcon-7b`, `falcon-40b`
-
-## Instance Types
-
-Common GPU instance types:
-
-- `Standard_NC6s_v3` - 1x V100 (16GB)
-- `Standard_NC12s_v3` - 2x V100 (32GB total)
-- `Standard_NC24s_v3` - 4x V100 (64GB total)
-- `Standard_NC24ads_A100_v4` - 1x A100 (80GB)
-
-## Fine-tuning Methods
-
-- `qlora` - QLoRA (Quantized Low-Rank Adaptation) - Memory efficient
-- `lora` - LoRA (Low-Rank Adaptation) - Standard approach
-
-## Output
-
-The command creates a Kaito Workspace resource in the specified namespace. You can monitor the deployment status using:
+### LoadBalancer Deployment
 
 ```bash
-kubectl kaito status --workspace-name <workspace-name>
+# Deploy with LoadBalancer for external access
+kubectl kaito deploy \
+  --workspace-name public-llama \
+  --model llama-3.1-8b-instruct \
+  --enable-load-balancer
 ```
+
+**Important Notes:**
+
+- The `--enable-load-balancer` flag adds the `kaito.sh/enable-lb: "true"` annotation to the workspace
+- This instructs the Kaito operator to create a LoadBalancer service for external access.
+- Only works with inference workspaces (cannot be used with `--tuning`)
+- May incur additional cloud provider costs for the LoadBalancer service
+
+## Required Parameters by Mode
+
+### Inference Mode (default)
+
+- **Required**: `--workspace-name`, `--model`
+- **Optional**: `--model-access-secret`, `--adapters`, `--inference-config`, `--instance-type`, `--count`, etc.
+
+### Tuning Mode (`--tuning` enabled)
+
+- **Required**: `--workspace-name`, `--model`, `--tuning`
+- **Required (one of)**: `--input-urls` OR `--input-pvc`
+- **Required (one of)**: `--output-image` OR `--output-pvc`
+- **Optional**: `--tuning-method`, `--output-image-secret`, `--tuning-config`, `--instance-type`, `--count`, etc.

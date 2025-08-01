@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	cmd "github.com/kaito-project/kubectl-kaito/pkg"
+	cmd "github.com/kaito-project/kaito-kubectl-plugin/pkg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/cli-runtime/pkg/genericclioptions"

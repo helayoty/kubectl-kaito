@@ -1,4 +1,4 @@
-# kubectl-kaito
+# kaito-kubectl-plugin
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -45,17 +45,77 @@ kubectl kaito chat --workspace-name my-workspace
 - [Kaito operator](https://github.com/kaito-project/kaito) installed in your cluster
 - kubectl configured to access your cluster
 
-### Install via Krew (Coming Soon)
+### Install via Krew
+
+> **Prerequisites**: Install [krew](https://krew.sigs.k8s.io/docs/user-guide/setup/install/) if you haven't already.
+
+#### From Krew Index (Coming Soon)
 
 ```bash
 kubectl krew install kaito
 ```
 
+#### Install from Local Manifest
+
+```bash
+# Clone the repository
+git clone https://github.com/kaito-project/kaito-kubectl-plugin.git
+cd kaito-kubectl-plugin
+
+# Generate manifest for a specific version
+./hack/generate-krew-manifest.sh v0.1.0
+
+# Install the generated manifest
+kubectl krew install --manifest=krew/kaito-v0.1.0.yaml
+```
+
+#### Install from URL
+
+```bash
+# Install a specific version from GitHub
+kubectl krew install --manifest=https://github.com/kaito-project/kaito-kubectl-plugin/releases/download/v1.0.0/kaito.yaml
+```
+
+#### Generate Krew Manifest Locally
+
+For development and testing:
+
+```bash
+# Generate complete manifest with real SHA256 values
+./hack/generate-krew-manifest.sh v1.0.0
+```
+
 ### Manual Installation
 
-1. Download the latest binary from the [releases page](https://github.com/helayoty/kubectl-kaito/releases)
+#### Download Pre-built Binary
+
+1. Download the latest binary from the [releases page](https://github.com/kaito-project/kaito-kubectl-plugin/releases)
 2. Extract and place the binary in your `$PATH` as `kubectl-kaito`
-3. Make it executable: `chmod +x kubectl-kaito`
+3. Make it executable:
+
+   ```bash
+   chmod +x kubectl-kaito
+   ```
+
+#### Build from Source
+
+```bash
+git clone https://github.com/kaito-project/kaito-kubectl-plugin.git
+cd kaito-kubectl-plugin
+make build
+sudo mv bin/kubectl-kaito /usr/local/bin/
+```
+
+### Verify Installation
+
+```bash
+# Check if the plugin is installed
+kubectl plugin list | grep kaito
+
+# Test basic functionality
+kubectl kaito --help
+kubectl kaito models list
+```
 
 ## Usage Examples
 
@@ -129,8 +189,8 @@ kubectl kaito deploy \
 
 ```bash
 # Clone the repository
-git clone https://github.com/kaito-project/kubectl-kaito.git
-cd kubectl-kaito
+git clone https://github.com/kaito-project/kaito-kubectl-plugin.git
+cd kaito-kubectl-plugin
 
 # Build the plugin
 make build

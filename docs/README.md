@@ -51,7 +51,7 @@ kubectl krew install kaito
 
 ### Manual Installation
 
-1. Download the latest binary from the [releases page](https://github.com/kaito-project/kubectl-kaito/releases)
+1. Download the latest binary from the [releases page](https://github.com/kaito-project/kaito-kubectl-plugin/releases)
 2. Place it in your `$PATH` as `kubectl-kaito`
 3. Make it executable: `chmod +x kubectl-kaito`
 

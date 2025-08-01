@@ -1,5 +1,3 @@
-# YAML linting configuration for kubectl-kaito project
----
 extends: default
 
 rules:

@@ -1,4 +1,4 @@
-module github.com/kaito-project/kubectl-kaito
+module github.com/kaito-project/kaito-kubectl-plugin
 
 go 1.24.3
 
